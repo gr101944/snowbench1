@@ -62,9 +62,9 @@ aws_region = os.getenv('AWS_DEFAULT_REGION')
     
     
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-os.environ["BING_SEARCH_URL"] = os.getenv('BING_SEARCH_URL')
-os.environ["BING_SUBSCRIPTION_KEY"] = os.getenv('BING_SUBSCRIPTION_KEY')
-os.environ["_BARD_API_KEY"] = os.getenv('BARD_API')
+bing_search_url = os.getenv('BING_SEARCH_URL')
+bing_subscription_key = os.getenv('BING_SUBSCRIPTION_KEY')
+bing_api = os.getenv('BARD_API')
 
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
