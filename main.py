@@ -62,9 +62,10 @@ aws_region = os.getenv('AWS_DEFAULT_REGION')
     
     
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
-bing_search_url = os.getenv('BING_SEARCH_URL')
-bing_subscription_key = os.getenv('BING_SUBSCRIPTION_KEY')
-bing_api = os.getenv('BARD_API')
+BING_SEARCH_URL = os.getenv('BING_SEARCH_URL')
+BING_SUBSCRIPTION_KEY = os.getenv('BING_SUBSCRIPTION_KEY')
+
+
 
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
@@ -91,7 +92,7 @@ def create_sidebar (st):
     source_data_list_default = [ 'KR1']
     task_list = [ 'Data Load', 'Query']
     source_category = ['KR1']
-    other_sources = ['Open AI', 'YouTube', 'Google',  'Bing', 'KR']
+    other_sources = ['Open AI', 'YouTube', 'Google', 'KR']
     other_sources_default = ['KR']
     embedding_options = ['OpenAI Ada', 'Other1']
     persistence_options = [ 'Vector DB', 'On Disk']
@@ -106,10 +107,11 @@ def create_sidebar (st):
         embedding_model_name  = st.radio('Embedding', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
         persistence_choice = st.radio('Persistence', persistence_options, help = "FAISS for on disk and Pinecone for Vector")
         
-        k_similarity = st.text_input ("K value",type="default",value="5")
+        k_similarity_text = st.text_input ("K value",type="default",value="5")
+        k_similarity = int(k_similarity_text)
         max_output_tokens = st.text_input ("Max Output Tokens",type="default",value="512")
         print("k_similarity ", k_similarity )
-        print("output_tokens ", max_output_tokens )
+        print("max_output_tokens ", max_output_tokens )
         print ('persistence_choice ', persistence_choice)    
     task= None
     task = st.sidebar.radio('Choose task:', task_list, help = "Program can both Load Data and perform query", index=0)
@@ -129,7 +131,7 @@ def create_sidebar (st):
             uploaded_files = st.file_uploader('Upload Files Here', accept_multiple_files=True)
             upload_kr_docs_button = st.button("Upload", key="upload_kr_docs")
     elif (task == 'Query'):
-            print ('In query')
+            print ('In Query')
             # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
             selected_sources = st.sidebar.multiselect(
             'Sources:',
@@ -152,7 +154,7 @@ def create_sidebar (st):
             if len(selected_sources) > 1:
                 summarize = st.sidebar.checkbox("Summarize", value=False, key=None, help='If checked, summarizes content from all sources along with individual responses', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
             else:
-                print ('case 1')
+              
                 summarize = None
             
             if 'Website' in selected_sources:
@@ -166,7 +168,7 @@ def create_sidebar (st):
                 youtube_url = st.sidebar.text_input("YouTube Url:", key='url', value = '', placeholder='Paste YouTube URL...', label_visibility="visible") 
             else:
                 youtube_url = None
-    print (ingest_source_chosen)
+    
     return model_name, persistence_choice, selected_sources, uploaded_files , summarize, website_url, youtube_url,k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category
 
 st.set_page_config(
@@ -192,7 +194,7 @@ if 'all_response_dict' not in st.session_state:
 if 'generated_hf' not in st.session_state:
     st.session_state['generated_hf'] = []
 if 'entity_memory' not in st.session_state:
-    st.session_state['entity_memory'] = ConversationEntityMemory (llm=llm, k=10)
+    st.session_state['entity_memory'] = ConversationEntityMemory (llm=llm, k=k_similarity)
 if 'generated_openai' not in st.session_state:
     st.session_state['generated_openai'] = []
 if 'generated_KR' not in st.session_state:
@@ -365,8 +367,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
     total_elements = len(chat_history_upload)
  
     result = ' '.join(chat_history_upload[:n]) if n <= total_elements else ' '.join(chat_history_upload)
-    print ('Before similarity search, maintaining history for similarity search')
-    print (result)
+
       
     docs = VectorStore.similarity_search(query=result, k=int (k_similarity))
     prompt = PromptTemplate(
@@ -443,14 +444,14 @@ def split_text_chunks2(input_text, x, percentage_overlap):
 
 def process_pdf_file(file_path):
     print ("in process_pdf_file")
-    print ("file path: ", file_path)
+   
     chunk_size = 400
     overlap = 20
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     aws_region = os.getenv('AWS_DEFAULT_REGION')
     aws_bucket = os.getenv('S3_BUCKET_NAME')
-    print('Processing PDF, extracting chunks ... ', file_path)
+    print('Processing PDF, extracting chunks ... ')
     s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
 
@@ -468,8 +469,7 @@ def process_pdf_file(file_path):
     for page_num in range(len(pdf_reader.pages)):
         page = pdf_reader.pages[page_num]
         text_content.append(page.extract_text())
-    print ('got text content:')
-    print (text_content)
+
        # text = updf.readPDF_text_pdfReader(file_path)
     text_splitter = RecursiveCharacterTextSplitter(
     # Set a really small chunk size, just to show.
@@ -495,7 +495,7 @@ def process_text_file(file_path):
     print('Processing text')
     chunk_size = 400
     overlap = 20
-    print('Processing PDF, extracting chunks ... ', file_path)
+    
     with open(file_path) as f:
         text_file= f.read()
    
@@ -582,11 +582,10 @@ def process_pptx_file(file_path):
 
 
 def process_bing_search(prompt,llm):
-    print ('In process Bing*************************', prompt)
-   
+    print ('In process Bing************************* New', prompt)
     
     import json
-    bing_search = BingSearchAPIWrapper(k=2)
+    bing_search = BingSearchAPIWrapper(k=k_similarity)
     tools = [
         Tool(
             name = "bing_search",
@@ -681,7 +680,7 @@ def process_google_search(prompt,llm):
         "response": response
     }
 
-    print (data)
+  
 
     json_data = json.dumps(data)  
     return json_data
@@ -711,7 +710,7 @@ def process_YTLinks(youtube_video_url, user_input):
         environment = os.environ['PINECONE_ENVIRONMENT']    
     )
     pinecone_index_name = os.environ['PINECONE_INDEX_NAME']
-    print ('pinecone index name ', pinecone_index_name)
+
     
  
     if len (chunks) < 100:
@@ -814,7 +813,7 @@ def process_wiki_search_new(prompt,llm):
     )
     #agent_chain = initialize_agent(tools, llm, agent=AgentType.CONVERSATIONAL_REACT_DESCRIPTION, verbose=True, memory=memory)
     wiki_research = agent_chain.run(input=prompt)
-    print (wiki_research)
+
     if (wiki_research == wiki_not_found):
         return_code = 400        
     else:
@@ -849,7 +848,7 @@ def process_hugging_face(question):
             st.session_state['chat_history_huggingface'] = []
     st.session_state['chat_history_huggingface'].append (question)
     result = ' '.join(st.session_state['chat_history_huggingface'])
-    print ("result " , result)
+  
   
     repo_id = "tiiuae/falcon-7b-instruct"  # See https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads for some other options
     falcon_llm = HuggingFaceHub(
@@ -904,20 +903,20 @@ def extract_english_response(response_dict):
 
 def process_bard(question):
     print ("Process Bard...")
-    print ("Question... " + question)
+    
     
     import json
     if 'chat_history_bard' not in st.session_state:
             st.session_state['chat_history_bard'] = []
     st.session_state['chat_history_bard'].append (question)
     result = ' '.join(st.session_state['chat_history_bard'])
-    print ("result " , result)
+
     response = Bard().get_answer(result)
-    print (response)
+ 
 
     # Extract the English response
     english_response = extract_english_response(response)
-    print(english_response)
+  
 
 
     data = {
@@ -948,7 +947,7 @@ def process_hugging_face2(question):
     # new_model_repo = "tiiuae/falcon-40b"
 
     PROMPT = PromptTemplate(input_variables=["chat_history", "input"], template=template)
-    print ("PROMPT ", PROMPT)
+    
     repo_id = "tiiuae/falcon-7b-instruct" 
     
     llm = HuggingFaceHub(
@@ -961,16 +960,7 @@ def process_hugging_face2(question):
         memory=st.session_state['memory_hf'] 
     )
     response = conversation.predict(input=question)
-    # print ("formatted_prompt ", formatted_prompt)
 
-    # data = conversation.predict (input = formatted_prompt)
-    # print (data)
-    # print ("Type is ", type(data))
-    # ai_assistance_response = data[0]['response']
-    # print ( "ai_assistance_response ", ai_assistance_response)
-    # assistant_instruction = ai_assistance_response.split('AI Assistant:', 1)[-1].strip()
-    # print ( "assistant_instruction ", assistant_instruction)
-    
 
     if response is None: 
 
@@ -1001,11 +991,11 @@ def extract_chunks_from_uploaded_file(uploaded_file):
 
     # Define the target path in S3
     s3_target_path = aws_bucket_input_path + uploaded_file.name
-    print (s3_target_path)
+    
 
     # Upload the file to S3
     s3.put_object(Body=bytes_data, Bucket=aws_bucket, Key=s3_target_path)
-    print ("File uploaded in S3")
+    
 
     # _ is used to ignore the base name of the file
     _, file_extension = os.path.splitext(uploaded_file.name)
@@ -1050,9 +1040,9 @@ def process_chatGPT2(prompt, model, Conversation):
  
     return json_data
 def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_data_list):
-    print ('In process_knowledge_base ')
+    print ('In process_knowledge_base Rajesh to change to get embed model from config ')
     from langchain.embeddings.openai import OpenAIEmbeddings
-
+    
     model_name = 'text-embedding-ada-002'
     dotenv.load_dotenv(".env")
     env_vars = dotenv.dotenv_values()
@@ -1087,8 +1077,8 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
 def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen):
     import json
     print('in process_uploaded_file')
-    print (type (uploaded_files))
-    notFound_response = "The application was unable to extract content from the uploaded file."
+  
+  
     if len(uploaded_files) > 0:
         print(f'Number of files uploaded: {len(uploaded_files)}')
         docs_chunks = []  # Initialize docs_chunks list
@@ -1140,8 +1130,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
 
             except pinecone.exceptions.PineconeException as e:
                 print(f"An error occurred: {str(e)}")
-            print('***********docs_chunks**********')
-            print (docs_chunks)
+
 
         
             docsearch = Pinecone.from_texts([t.page_content for t in docs_chunks], embeddings, index_name=index_name)
@@ -1193,7 +1182,7 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
             elif (element == 'KR'):
                 print ('Processing KR')
                 str_response = selected_elements_functions[element](prompt, model, Conversation, sources_chosen, source_data_list)
-                print ('str_response : ', str_response)
+            
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
             elif (element == 'Google'):
@@ -1240,8 +1229,7 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
             else:
                 print ("check chosen sources")
             accumulated_json = {"all_responses": all_responses}
-            print ('accumulated_json')
-            print (accumulated_json)
+
       
 
             accumulated_json_str = json.dumps(accumulated_json)
@@ -1262,8 +1250,6 @@ def get_response(user_input, source_data_list):
         with st.spinner("Searching requested sources..."):        
             str_resp = selected_data_sources(selected_sources, user_input, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list)               
             data = json.loads(str_resp)['all_responses']
-            print ('data')
-            print (data)
 
             response_dict = {
                 'wiki_response': None,
@@ -1279,9 +1265,9 @@ def get_response(user_input, source_data_list):
             for response in data:
                 source = response['source']
                 if source in selected_sources:
-                    print ('in if')
+                  
                     response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']
-                    print ('reached 1')
+                 
            
             st.session_state["past"].append(user_input)
         
@@ -1314,7 +1300,7 @@ def get_response(user_input, source_data_list):
 
             if youtube_response:
                 print ('in YouTube response')
-                print (youtube_response)
+               
                 #st.session_state['generated'].append(google_response)
                 st.session_state['generated_youtube'].append(youtube_response)
                 all_response_str = all_response_str + "From YouTube  \n" + "-----------------------------" + "\n\n" + youtube_response + "\n\n"
@@ -1343,7 +1329,7 @@ def get_response(user_input, source_data_list):
                 all_response_str = all_response_str + "From OpenAI  \n" + "----------------------" + "\n\n" + openai_response + "\n\n"
             if kr_response:
                 print ('kr_response *****************************************') 
-                print (kr_response) 
+              
                 #st.session_state['generated'].append(openai_response)
                 st.session_state['generated_KR'].append(kr_response)
                 choice_str = ', '.join(sources_chosen) if sources_chosen else "None selected"
@@ -1382,7 +1368,7 @@ def get_response(user_input, source_data_list):
 
                     latest_index = len(st.session_state['generated']) - 1
 
-                    st.info(st.session_state["past"][latest_index], icon="🎸")
+                    st.info(st.session_state["past"][latest_index], icon="✅")
                     st.success(st.session_state["generated"][latest_index], icon="✅")
                     download_str.append(st.session_state["past"][latest_index])
                     download_str.append(st.session_state["generated"][latest_index])
@@ -1390,7 +1376,7 @@ def get_response(user_input, source_data_list):
                         st.balloons()
                     if dislikeButton:
                         st.snow()
-                    st.toast ("Developed by :orange[Rajesh Ghosh] 🎸")
+                    st.toast ("Developed by :orange[Rajesh Ghosh] ✅")
 
                                     
                     if summarize:
@@ -1398,17 +1384,17 @@ def get_response(user_input, source_data_list):
                         st.subheader('Summary from all sources')
                         generated_string = str(st.session_state['generated'][-1])
 
-                        print ('Generated String before summary')
-                        print (generated_string)
+
                         summary = process_chatGPT2("Please generate a short summary of the following text in professional words: " + generated_string, model, Conversation)
-            
 
                         summary_json = json.loads(summary)  # Parse the summary string as JSON
+                  
                         response = summary_json['response']  # Extract the 'response' field from the summary JSON
-
+                     
                         summary_dict.append(response)
+                        st.success(summary_dict[0], icon="✅")
                         
-                        message(summary_dict)
+                        # message(summary_dict)
 
 
 response_container = st.container()

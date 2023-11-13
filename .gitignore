@@ -3,8 +3,7 @@
 # Ignore .pdf files
 *.pdf
 # Ignore .txt files
-*.txt
-# Ignore .pdf files
+
 *.xlsx
 # Ignore .pdf files
 *.doc
