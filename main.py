@@ -78,8 +78,8 @@ else:
     print("SERPAPI_API_KEY key not found. Please make sure you have set the SERPAPI_API_KEY environment variable.")
 
 pinecone.init (
-    api_key = os.getenv['PINECONE_API_KEY'],
-    environment = os.getenv['PINECONE_ENVIRONMENT']    
+    api_key = os.getenv('PINECONE_API_KEY'),
+    environment = os.getenv('PINECONE_ENVIRONMENT')    
 )
 
 
@@ -706,10 +706,10 @@ def process_YTLinks(youtube_video_url, user_input):
     for key in env_vars:
         os.environ[key] = env_vars[key]
     pinecone.init (
-        api_key = os.getenv['PINECONE_API_KEY'],
-        environment = os.getenv['PINECONE_ENVIRONMENT']    
+        api_key = os.getenv('PINECONE_API_KEY'),
+        environment = os.getenv('PINECONE_ENVIRONMENT')   
     )
-    pinecone_index_name = os.environ['PINECONE_INDEX_NAME']
+    pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
 
     
  
@@ -1049,10 +1049,10 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
     for key in env_vars:
         os.environ[key] = env_vars[key]
     pinecone.init (
-        api_key = os.environ['PINECONE_API_KEY'],
-        environment = os.environ['PINECONE_ENVIRONMENT']    
+        api_key = os.getenv('PINECONE_API_KEY'),
+        environment = os.getenv('PINECONE_ENVIRONMENT')   
     )
-    pinecone_index_name = os.environ['PINECONE_INDEX_NAME']
+    pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
 
     
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
@@ -1117,10 +1117,10 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
             for key in env_vars:
                 os.environ[key] = env_vars[key]
             pinecone.init (
-                api_key = os.environ['PINECONE_API_KEY'],
-                environment = os.environ['PINECONE_ENVIRONMENT']    
+                api_key = os.getenv('PINECONE_API_KEY'),
+                environment = os.getenv('PINECONE_ENVIRONMENT')   
             )
-            pinecone_index_name = os.environ['PINECONE_INDEX_NAME']
+            pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
             try:
                 index_name = pinecone_index_name  # Specify the index name as a string
                 indexPinecone = pinecone.Index(index_name)
