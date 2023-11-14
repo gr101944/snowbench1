@@ -7,6 +7,8 @@ import openai
 import PyPDF2
 import io
 
+import tiktoken
+
 
 from langchain.llms import OpenAI
 from langchain.chains.question_answering import load_qa_chain
@@ -14,6 +16,8 @@ from langchain.prompts import PromptTemplate
 import streamlit as st
 from langchain.vectorstores import Pinecone
 import pinecone
+
+
 
 from langchain.chains import LLMChain 
 from langchain.agents import load_tools
@@ -59,6 +63,10 @@ SERPAPI_API_KEY=os.getenv('SERPAPI_API_KEY')
 aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
 aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
 aws_region = os.getenv('AWS_DEFAULT_REGION')
+
+STATIC_ASSEST_BUCKET_URL = os.getenv("STATIC_ASSEST_BUCKET_URL")
+STATIC_ASSEST_BUCKET_FOLDER = os.getenv("STATIC_ASSEST_BUCKET_FOLDER")
+LOGO_NAME = os.getenv("LOGO_NAME")
     
     
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
@@ -84,9 +92,63 @@ pinecone.init (
 
 
 memory = ConversationBufferMemory(return_messages=True)
+def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
+    """Return the number of tokens used by a list of messages."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        print("Warning: model not found. Using cl100k_base encoding.")
+        encoding = tiktoken.get_encoding("cl100k_base")
+    if model in {
+        "gpt-3.5-turbo-0613",
+        "gpt-3.5-turbo-16k-0613",
+        "gpt-4-0314",
+        "gpt-4-32k-0314",
+        "gpt-4-0613",
+        "gpt-4-32k-0613",
+        }:
+        tokens_per_message = 3
+        tokens_per_name = 1
+    elif model == "gpt-3.5-turbo-0301":
+        tokens_per_message = 4  # every message follows <|start|>{role/name}\n{content}<|end|>\n
+        tokens_per_name = -1  # if there's a name, the role is omitted
+    elif "gpt-3.5-turbo" in model:
+        print("Warning: gpt-3.5-turbo may update over time. Returning num tokens assuming gpt-3.5-turbo-0613.")
+        return num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613")
+    elif "gpt-4" in model:
+        print("Warning: gpt-4 may update over time. Returning num tokens assuming gpt-4-0613.")
+        return num_tokens_from_messages(messages, model="gpt-4-0613")
+    else:
+        raise NotImplementedError(
+            f"""num_tokens_from_messages() is not implemented for model {model}. See https://github.com/openai/openai-python/blob/main/chatml.md for information on how messages are converted to tokens."""
+        )
+    num_tokens = 0
+    for message in messages:
+        num_tokens += tokens_per_message
+        for key, value in message.items():
+            num_tokens += len(encoding.encode(value))
+            if key == "name":
+                num_tokens += tokens_per_name
+    num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
+    return num_tokens
 
 def create_sidebar (st):
     # Need to push to env
+    st.sidebar.markdown(
+        """
+        <style>
+            img {
+                margin-top: -90px;  /* Adjust this value as needed */
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    image_path = os.path.join(STATIC_ASSEST_BUCKET_URL, STATIC_ASSEST_BUCKET_FOLDER, LOGO_NAME)
+    with st.sidebar:
+        st.image(image_path, width=55)
+  
 
     source_data_list = [ 'KR1']
     source_data_list_default = [ 'KR1']
@@ -98,8 +160,7 @@ def create_sidebar (st):
     persistence_options = [ 'Vector DB', 'On Disk']
     # 
     url = "https://www.persistent.com/"
-   
-    st.sidebar.write(f"🔗 [**:green[Peristent]** ]({url})")    
+    
    
     with st.sidebar.expander(" 🛠️ Configurations ", expanded=False):
     # Option to preview memory store
@@ -345,11 +406,16 @@ def process_GoogleDocs(prompt, llm):
 
 def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity):
     print ('In search_vector_store3', model)
+    from langchain.chat_models import ChatOpenAI
+    from langchain.callbacks import get_openai_callback
 
     if 'chat_history_upload' not in st.session_state:
         st.session_state['chat_history_upload'] = []
         
     st.session_state['chat_history_upload'].append (user_input)
+    
+    chat_history_upload = st.session_state['chat_history_upload']
+    # print (chat_history_upload)
     template = """You are a chatbot having a conversation with a human.
 
         Given the following extracted parts of a long document and a question, explain the answer in a paragraph
@@ -359,10 +425,9 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         {chat_history_upload}
         Human: {user_input}
         Chatbot:"""
-
     
     n = 4  # Replace with the desired value of n
-    chat_history_upload = st.session_state['chat_history_upload']
+    
     
     total_elements = len(chat_history_upload)
  
@@ -371,18 +436,25 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
       
     docs = VectorStore.similarity_search(query=result, k=int (k_similarity))
     prompt = PromptTemplate(
-            input_variables=["chat_history_upload", "user_input","context"], template=template
+            input_variables=["chat_history_upload", "user_input", "context"], template=template
     )
-    
-    llm = OpenAI(model_name=model, temperature=0.7, max_tokens=2048)
    
     memory = ConversationBufferMemory(memory_key="chat_history_upload", input_key="user_input")
 
     chain = load_qa_chain(
             llm=llm, chain_type="stuff", memory=memory , prompt=prompt
         )
- 
-    response  = chain({"input_documents": docs, "user_input": user_input}, return_only_outputs=True)
+    with get_openai_callback() as cb:
+        response  = chain({"input_documents": docs, "user_input": user_input}, return_only_outputs=True)
+        input_tokens = cb.prompt_tokens
+        output_tokens = cb.completion_tokens
+        cost = round(cb.total_cost, 6)
+        st.sidebar.write(f"**Usage Info:** ")
+        st.sidebar.write(f"**Input Tokens:** {input_tokens}")
+        st.sidebar.write(f"**Output Tokens:** {output_tokens}")
+        st.sidebar.write(f"**Cost :** {cost}")
+        # st.write(f"**Input Tokens:** {input_tokens} | **Output Tokens:** {output_tokens} | **Cost:** {cost}")
+
 
     if "I don't know" in response or response == None:
         print ('In I dont know')
@@ -1424,6 +1496,7 @@ with container:
             st.balloons()
         if dislikeButton:
             st.snow()
+        model = "gpt-3.5-turbo"
         
         get_response (user_input, source_data_list)
 
