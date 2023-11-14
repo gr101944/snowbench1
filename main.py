@@ -1,11 +1,11 @@
 import os
-
 import boto3
 import json
 import dotenv
 import openai
 import PyPDF2
 import io
+import uuid
 
 import tiktoken
 
@@ -72,7 +72,8 @@ LOGO_NAME = os.getenv("LOGO_NAME")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 BING_SEARCH_URL = os.getenv('BING_SEARCH_URL')
 BING_SUBSCRIPTION_KEY = os.getenv('BING_SUBSCRIPTION_KEY')
-
+PROMPT_UPDATE_LAMBDA = os.getenv('PROMPT_UPDATE_LAMBDA')
+lambda_client = boto3.client('lambda', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
 
 if OPENAI_API_KEY:
@@ -148,6 +149,7 @@ def create_sidebar (st):
     image_path = os.path.join(STATIC_ASSEST_BUCKET_URL, STATIC_ASSEST_BUCKET_FOLDER, LOGO_NAME)
     with st.sidebar:
         st.image(image_path, width=55)
+        
   
 
     source_data_list = [ 'KR1']
@@ -156,8 +158,8 @@ def create_sidebar (st):
     source_category = ['KR1']
     other_sources = ['Open AI', 'YouTube', 'Google', 'KR']
     other_sources_default = ['KR']
-    embedding_options = ['OpenAI Ada', 'Other1']
-    persistence_options = [ 'Vector DB', 'On Disk']
+    embedding_options = ['text-embedding-ada-002']
+    persistence_options = [ 'Vector DB']
     # 
     url = "https://www.persistent.com/"
     
@@ -174,6 +176,7 @@ def create_sidebar (st):
         print("k_similarity ", k_similarity )
         print("max_output_tokens ", max_output_tokens )
         print ('persistence_choice ', persistence_choice)    
+        print ('embedding_model_name ', embedding_model_name)   
     task= None
     task = st.sidebar.radio('Choose task:', task_list, help = "Program can both Load Data and perform query", index=0)
     selected_sources = None
@@ -195,9 +198,9 @@ def create_sidebar (st):
             print ('In Query')
             # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
             selected_sources = st.sidebar.multiselect(
-            'Sources:',
-            other_sources,
-            other_sources_default
+                'Sources:',
+                other_sources,
+                other_sources_default
               )
             if 'KR' in selected_sources:
                 # Show the 'sources_chosen' multiselect
@@ -230,7 +233,7 @@ def create_sidebar (st):
             else:
                 youtube_url = None
     
-    return model_name, persistence_choice, selected_sources, uploaded_files , summarize, website_url, youtube_url,k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category
+    return model_name, persistence_choice, selected_sources, uploaded_files , summarize, website_url, youtube_url,k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category, embedding_model_name
 
 st.set_page_config(
     page_title="NexgenBot", 
@@ -238,7 +241,7 @@ st.set_page_config(
     )
 
 
-model_name, persistence_choice, selected_sources, uploaded_files, summarize, website_url, youtube_url,  k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category = create_sidebar (st)
+model_name, persistence_choice, selected_sources, uploaded_files, summarize, website_url, youtube_url,  k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category, embedding_model_name = create_sidebar (st)
 print ("ingest_source_chosen ", ingest_source_chosen)
 if model_name == "GPT-3.5":
     model = "gpt-3.5-turbo"
@@ -415,7 +418,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
     st.session_state['chat_history_upload'].append (user_input)
     
     chat_history_upload = st.session_state['chat_history_upload']
-    # print (chat_history_upload)
+   
     template = """You are a chatbot having a conversation with a human.
 
         Given the following extracted parts of a long document and a question, explain the answer in a paragraph
@@ -449,6 +452,35 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         input_tokens = cb.prompt_tokens
         output_tokens = cb.completion_tokens
         cost = round(cb.total_cost, 6)
+        random_string = str(uuid.uuid4())
+        lambda_function_name = PROMPT_UPDATE_LAMBDA
+        user_name_logged = "Rajesh"
+        data = {    
+            "user": user_name_logged,
+            "promptName": "prompt-" + random_string,
+            "prompt": user_input,
+            "completion": response['output_text'],
+            "summary": "summary-from-code",
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "cost": cost,
+            "like": ""
+        }
+        if 'curent_user' not in st.session_state:
+            st.session_state['current_user'] = []
+        if 'curent_promptName' not in st.session_state:
+                st.session_state['curent_promptName'] = []
+        st.session_state['current_user'] = user_name_logged
+        st.session_state['curent_promptName'] = "prompt-" + random_string
+
+        # Invoke the Lambda function
+        lambda_response = lambda_client.invoke(
+            FunctionName=lambda_function_name,
+            InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
+            Payload=json.dumps(data)
+        )
+        if lambda_response['StatusCode'] != 200:
+            raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
         st.sidebar.write(f"**Usage Info:** ")
         st.sidebar.write(f"**Input Tokens:** {input_tokens}")
         st.sidebar.write(f"**Output Tokens:** {output_tokens}")
@@ -457,7 +489,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
 
     if "I don't know" in response or response == None:
-        print ('In I dont know')
+       
         st.write('Info not in artefact...') 
     else:
         print ('returning response from upload...')
@@ -550,11 +582,7 @@ def process_pdf_file(file_path):
         length_function = len,
     )
     chunks = text_splitter.create_documents(text_content)
-    print ("Number of Chunks")
-    print (len (chunks))
-    # print (chunks)
 
-    #chunks = split_text_chunks2 (text, chunk_size, percentage_overlap )
 
     if len(chunks) == 0:
         print ('No chunks extracted')
@@ -654,7 +682,7 @@ def process_pptx_file(file_path):
 
 
 def process_bing_search(prompt,llm):
-    print ('In process Bing************************* New', prompt)
+    print ('In process Bing', prompt)
     
     import json
     bing_search = BingSearchAPIWrapper(k=k_similarity)
@@ -704,7 +732,7 @@ def process_bing_search(prompt,llm):
     return json_data
 
 def process_google_search(prompt,llm):
-    print ('In process Google*************************', prompt)
+    print ('In process Google', prompt)
  
     
     import json
@@ -764,9 +792,6 @@ def process_YTLinks(youtube_video_url, user_input):
     print ('In process_YTLinks New', user_input)      
 
     youtube_video_id = extract_youtube_id (youtube_video_url)
-    print('YouTube Id extraction')
-    print (youtube_video_id)
-
     loader = YoutubeLoader.from_youtube_url(youtube_video_url, add_video_info=False)
     
     youtube_transcript_list = loader.load()
@@ -815,7 +840,7 @@ def process_YTLinks(youtube_video_url, user_input):
                 "response": output_text
             }
             json_data = json.dumps(data)
-                                #print(docs[0].page_content[:200])
+
             return json_data
     else:
         print ("too many chunks")
@@ -846,7 +871,7 @@ def process_Wikipedia2(prompt, llm):
 
 def process_wiki_search_new(prompt,llm):
 
-    print ('In process wiki new*************************')
+    print ('In process wiki new')
     
    
     import json
@@ -1095,7 +1120,7 @@ def process_chatGPT2(prompt, model, Conversation):
     response = Conversation.run(input=prompt)
     st.session_state['messages'].append({"role": "assistant", "content": response})
 
-    # print(st.session_state['messages'])
+  
     total_tokens = 0
     prompt_tokens = 0
     completion_tokens = 0
@@ -1115,7 +1140,7 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
     print ('In process_knowledge_base Rajesh to change to get embed model from config ')
     from langchain.embeddings.openai import OpenAIEmbeddings
     
-    model_name = 'text-embedding-ada-002'
+    model_name = embedding_model_name
     dotenv.load_dotenv(".env")
     env_vars = dotenv.dotenv_values()
     for key in env_vars:
