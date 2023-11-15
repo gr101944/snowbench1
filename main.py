@@ -72,7 +72,9 @@ LOGO_NAME = os.getenv("LOGO_NAME")
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 BING_SEARCH_URL = os.getenv('BING_SEARCH_URL')
 BING_SUBSCRIPTION_KEY = os.getenv('BING_SUBSCRIPTION_KEY')
+PROMPT_INSERT_LAMBDA = os.getenv('PROMPT_INSERT_LAMBDA')
 PROMPT_UPDATE_LAMBDA = os.getenv('PROMPT_UPDATE_LAMBDA')
+PROMPT_QUERY_LAMBDA = os.getenv('PROMPT_QUERY_LAMBDA')
 lambda_client = boto3.client('lambda', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
 
@@ -453,10 +455,10 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         output_tokens = cb.completion_tokens
         cost = round(cb.total_cost, 6)
         random_string = str(uuid.uuid4())
-        lambda_function_name = PROMPT_UPDATE_LAMBDA
-        user_name_logged = "Rajesh"
+        
+        user_name_logged = "Rajesh5"
         data = {    
-            "user": user_name_logged,
+            "userName": user_name_logged,
             "promptName": "prompt-" + random_string,
             "prompt": user_input,
             "completion": response['output_text'],
@@ -474,6 +476,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         st.session_state['curent_promptName'] = "prompt-" + random_string
 
         # Invoke the Lambda function
+        lambda_function_name = PROMPT_INSERT_LAMBDA
         lambda_response = lambda_client.invoke(
             FunctionName=lambda_function_name,
             InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
@@ -481,6 +484,8 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         )
         if lambda_response['StatusCode'] != 200:
             raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
+        else:
+            print ("Success!")
         st.sidebar.write(f"**Usage Info:** ")
         st.sidebar.write(f"**Input Tokens:** {input_tokens}")
         st.sidebar.write(f"**Output Tokens:** {output_tokens}")
@@ -1299,10 +1304,6 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
                 all_responses.append(json_response)
             elif (element == 'Website'):
                 print ('Processing Website ')
-                #with st.spinner("Crawling..."): 
-                #    primary_urls = [website_url]
-                #    depth = 2
-                #    crawl_site(primary_urls, depth)
                 str_response = selected_elements_functions[element]("site:"+ website_url + " " + prompt, llm)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
@@ -1470,8 +1471,13 @@ def get_response(user_input, source_data_list):
                     download_str.append(st.session_state["past"][latest_index])
                     download_str.append(st.session_state["generated"][latest_index])
                     if likeButton:
+                        print ('In Like')
+                        print (st.session_state['current_user'])
+                        print (st.session_state['curent_promptName'])
                         st.balloons()
                     if dislikeButton:
+                        print (st.session_state['current_user'])
+                        print (st.session_state['curent_promptName'])
                         st.snow()
                     st.toast ("Developed by :orange[Rajesh Ghosh] ✅")
 
@@ -1518,8 +1524,40 @@ with container:
         dislikeButton = col8.button(":-1:")
     
         if likeButton:
+            print ('In Like 2')
+            data = {    
+                "userName": st.session_state['current_user'],
+                "promptName": st.session_state['curent_promptName'],
+                "like": "Yes"
+
+            }
+            lambda_function_name = PROMPT_UPDATE_LAMBDA
+            lambda_response = lambda_client.invoke(
+                FunctionName=lambda_function_name,
+                InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
+                Payload=json.dumps(data)
+            )
+            if lambda_response['StatusCode'] != 200:
+                raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
+            print (st.session_state['current_user'])
+            print (st.session_state['curent_promptName'])
             st.balloons()
         if dislikeButton:
+            print ('In dislike')
+            data = {    
+                "userName": st.session_state['current_user'],
+                "promptName": st.session_state['curent_promptName'],
+                "like": "No"
+
+            }
+            lambda_function_name = PROMPT_UPDATE_LAMBDA
+            lambda_response = lambda_client.invoke(
+                FunctionName=lambda_function_name,
+                InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
+                Payload=json.dumps(data)
+            )
+            if lambda_response['StatusCode'] != 200:
+                raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
             st.snow()
         model = "gpt-3.5-turbo"
         
