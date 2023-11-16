@@ -489,7 +489,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         st.sidebar.write(f"**Usage Info:** ")
         st.sidebar.write(f"**Input Tokens:** {input_tokens}")
         st.sidebar.write(f"**Output Tokens:** {output_tokens}")
-        st.sidebar.write(f"**Cost :** {cost}")
+        st.sidebar.write(f"**Cost($):** {cost}")
         # st.write(f"**Input Tokens:** {input_tokens} | **Output Tokens:** {output_tokens} | **Cost:** {cost}")
 
 
@@ -508,29 +508,13 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
     return json_data
 
-
-
-
-
-
-
-
-
 text_splitter = CharacterTextSplitter(        
     
     chunk_size = 1000,
     chunk_overlap  = 200,
     length_function = len,
 )
-text_splitter2 = RecursiveCharacterTextSplitter(
-    chunk_size = 300,
-    chunk_overlap  = 10,
-    length_function = len,
-    add_start_index = True,
-)
-text_splitter3 = CharacterTextSplitter.from_tiktoken_encoder(
-    chunk_size=100, chunk_overlap=0
-)
+
 def split_text_chunks(input_text, x):
     return [input_text[i:i+x] for i in range(0, len(input_text), x)]
 
@@ -950,8 +934,7 @@ def process_hugging_face(question):
             st.session_state['chat_history_huggingface'] = []
     st.session_state['chat_history_huggingface'].append (question)
     result = ' '.join(st.session_state['chat_history_huggingface'])
-  
-  
+    
     repo_id = "tiiuae/falcon-7b-instruct"  # See https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads for some other options
     falcon_llm = HuggingFaceHub(
         repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": 300}
@@ -977,8 +960,6 @@ def process_hugging_face(question):
 
     response = remove_repetitions(response)
 
-
-
     data = {
         "source": "Hugging Face",
         "response": response
@@ -986,6 +967,7 @@ def process_hugging_face(question):
 
     json_data = json.dumps(data)  
     return json_data
+
 def extract_english_response(response_dict):
     import re
     from langdetect import detect
@@ -1004,8 +986,7 @@ def extract_english_response(response_dict):
     return english_response.strip()
 
 def process_bard(question):
-    print ("Process Bard...")
-    
+    print ("Process Bard...")    
     
     import json
     if 'chat_history_bard' not in st.session_state:
@@ -1015,12 +996,8 @@ def process_bard(question):
 
     response = Bard().get_answer(result)
  
-
-    # Extract the English response
     english_response = extract_english_response(response)
   
-
-
     data = {
         "source": "Bard",
         "response": english_response
@@ -1043,10 +1020,6 @@ def process_hugging_face2(question):
     {chat_history}
     Human: {input}
     AI Assistant:"""
-
-    # llama_repo = "meta-llama/Llama-2-70b-hf"
-    # falcon_repo = "tiiuae/falcon-7b-instruct"
-    # new_model_repo = "tiiuae/falcon-40b"
 
     PROMPT = PromptTemplate(input_variables=["chat_history", "input"], template=template)
     
@@ -1124,8 +1097,7 @@ def process_chatGPT2(prompt, model, Conversation):
 
     response = Conversation.run(input=prompt)
     st.session_state['messages'].append({"role": "assistant", "content": response})
-
-  
+ 
     total_tokens = 0
     prompt_tokens = 0
     completion_tokens = 0
@@ -1141,6 +1113,7 @@ def process_chatGPT2(prompt, model, Conversation):
     json_data = json.dumps(response_openai)
  
     return json_data
+
 def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_data_list):
     print ('In process_knowledge_base Rajesh to change to get embed model from config ')
     from langchain.embeddings.openai import OpenAIEmbeddings
@@ -1184,10 +1157,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
     if len(uploaded_files) > 0:
         print(f'Number of files uploaded: {len(uploaded_files)}')
         docs_chunks = []  # Initialize docs_chunks list
-        vector_stores = []
-
   
-
         for index, uploaded_file in enumerate(uploaded_files):
             if len(uploaded_file.name) >= 5 and uploaded_file.name[-5] == '.' and uploaded_file.name[-4:].isalpha():
                 store_name = uploaded_file.name[:-5] 
@@ -1232,18 +1202,10 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
 
             except pinecone.exceptions.PineconeException as e:
                 print(f"An error occurred: {str(e)}")
-
-
         
             docsearch = Pinecone.from_texts([t.page_content for t in docs_chunks], embeddings, index_name=index_name)
-            
-
-
+           
             return ingest_source_chosen
-
-
-
-
 
 def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list):
     print ("In selected_data_sources")
@@ -1268,7 +1230,6 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
         
     }
 
-    responses = []
     for element in selected_elements:
         if element in selected_elements_functions:
             if element == 'Uploads':
@@ -1309,10 +1270,6 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
                 all_responses.append(json_response)
             elif (element == 'YouTube'):
                 print ('Processing YouTube')
-                #with st.spinner("Crawling..."): 
-                #    primary_urls = [website_url]
-                #    depth = 2
-                #    crawl_site(primary_urls, depth)
                 str_response = selected_elements_functions[element](youtube_url , prompt)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
@@ -1334,7 +1291,22 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
 
 
     return accumulated_json_str
+def update_prompt(like_status):
+    data = {
+        "userName": st.session_state['current_user'],
+        "promptName": st.session_state['curent_promptName'],
+        "like": like_status
+    }
 
+    lambda_function_name = PROMPT_UPDATE_LAMBDA
+    lambda_response = lambda_client.invoke(
+        FunctionName=lambda_function_name,
+        InvocationType='RequestResponse',
+        Payload=json.dumps(data)
+    )
+
+    if lambda_response['StatusCode'] != 200:
+        raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
 
 def get_response(user_input, source_data_list):
     import json
@@ -1470,18 +1442,7 @@ def get_response(user_input, source_data_list):
                     st.success(st.session_state["generated"][latest_index], icon="✅")
                     download_str.append(st.session_state["past"][latest_index])
                     download_str.append(st.session_state["generated"][latest_index])
-                    if likeButton:
-                        print ('In Like')
-                        print (st.session_state['current_user'])
-                        print (st.session_state['curent_promptName'])
-                        st.balloons()
-                    if dislikeButton:
-                        print (st.session_state['current_user'])
-                        print (st.session_state['curent_promptName'])
-                        st.snow()
-                    st.toast ("Developed by :orange[Rajesh Ghosh] ✅")
-
-                                    
+                                   
                     if summarize:
                         summary_dict = []
                         st.subheader('Summary from all sources')
@@ -1508,72 +1469,32 @@ with container:
     if (task =='Data Load'):
         if upload_kr_docs_button:
             uploaded_kr = process_uploaded_file( uploaded_files,  persistence_choice, ingest_source_chosen)
-   
             st.write ("Done!")
-            
-            
+             
     if (task =='Query'):
         selected_sources_text = ", ".join(selected_sources)
         ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
-    
-    #st.markdown("This text is :red[colored red], and this is **:blue[colored]** and bold.")
         user_input = st.text_input(ask_text, key='input', value = '', placeholder='Ask something...', label_visibility="visible") 
         col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
         goButton = col1.button("Go")
         likeButton = col7.button(":+1:")
         dislikeButton = col8.button(":-1:")
-    
         if likeButton:
-            print ('In Like 2')
-            data = {    
-                "userName": st.session_state['current_user'],
-                "promptName": st.session_state['curent_promptName'],
-                "like": "Yes"
-
-            }
-            lambda_function_name = PROMPT_UPDATE_LAMBDA
-            lambda_response = lambda_client.invoke(
-                FunctionName=lambda_function_name,
-                InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
-                Payload=json.dumps(data)
-            )
-            if lambda_response['StatusCode'] != 200:
-                raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
-            print (st.session_state['current_user'])
-            print (st.session_state['curent_promptName'])
-            st.balloons()
+            print('In Like')
+            update_prompt("Yes")
         if dislikeButton:
-            print ('In dislike')
-            data = {    
-                "userName": st.session_state['current_user'],
-                "promptName": st.session_state['curent_promptName'],
-                "like": "No"
-
-            }
-            lambda_function_name = PROMPT_UPDATE_LAMBDA
-            lambda_response = lambda_client.invoke(
-                FunctionName=lambda_function_name,
-                InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
-                Payload=json.dumps(data)
-            )
-            if lambda_response['StatusCode'] != 200:
-                raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
-            st.snow()
-        model = "gpt-3.5-turbo"
-        
+            print('In Dislike ')
+            update_prompt("No")        
         get_response (user_input, source_data_list)
-
-    # Allow to download as wellst.session_state["past"]
         download_str = []
         # Display the conversation history using an expander, and allow the user to download it
         with st.expander("Download Conversation", expanded=False):
             for i in range(len(st.session_state['generated'])-1, -1, -1):
-                st.info(st.session_state["past"][i],icon="🎸")
+                st.info(st.session_state["past"][i],icon="✅")
                 st.success(st.session_state["generated"][i], icon="✅")
                 download_str.append(st.session_state["past"][i])
                 download_str.append(st.session_state["generated"][i])
-            
-            # Can throw error - requires fix
+ 
             download_str = '\n'.join(download_str)
             if download_str:
                 st.download_button('Download',download_str)
