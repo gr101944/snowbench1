@@ -8,6 +8,7 @@ import io
 import uuid
 
 import tiktoken
+from streamlit_option_menu import option_menu
 
 
 from langchain.llms import OpenAI
@@ -137,6 +138,7 @@ def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
 
 def create_sidebar (st):
     # Need to push to env
+
     st.sidebar.markdown(
         """
         <style>
@@ -151,14 +153,14 @@ def create_sidebar (st):
     image_path = os.path.join(STATIC_ASSEST_BUCKET_URL, STATIC_ASSEST_BUCKET_FOLDER, LOGO_NAME)
     with st.sidebar:
         st.image(image_path, width=55)
-        
-  
+    
 
     source_data_list = [ 'KR1']
     source_data_list_default = [ 'KR1']
     task_list = [ 'Data Load', 'Query']
     source_category = ['KR1']
-    other_sources = ['Open AI', 'YouTube', 'Google', 'KR']
+    other_sources = ['Open AI', 'YouTube', 'Google', 'KR', 'text2Image']
+    text2Image_source = ['text2Image']
     other_sources_default = ['KR']
     embedding_options = ['text-embedding-ada-002']
     persistence_options = [ 'Vector DB']
@@ -170,7 +172,7 @@ def create_sidebar (st):
     # Option to preview memory store
         model_name  = st.selectbox(label='LLM', options=['gpt-3.5-turbo','text-davinci-003'], help='GPT-4 in waiting list 🤨')
         embedding_model_name  = st.radio('Embedding', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
-        persistence_choice = st.radio('Persistence', persistence_options, help = "FAISS for on disk and Pinecone for Vector")
+        persistence_choice = st.radio('Persistence', persistence_options, help = "Using Pinecone...")
         
         k_similarity_text = st.text_input ("K value",type="default",value="5")
         k_similarity = int(k_similarity_text)
@@ -189,6 +191,7 @@ def create_sidebar (st):
     upload_kr_docs_button = None
     ingest_source_chosen = None
     sources_chosen = None
+    selected_sources_image = None
     print ("***********task***************")
     print (task)
     if (task == 'Data Load'):
@@ -198,52 +201,93 @@ def create_sidebar (st):
             upload_kr_docs_button = st.button("Upload", key="upload_kr_docs")
     elif (task == 'Query'):
             print ('In Query')
-            # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
-            selected_sources = st.sidebar.multiselect(
-                'Sources:',
-                other_sources,
-                other_sources_default
+            selected_sources_image = st.sidebar.multiselect(
+                'Image Generation:',
+                text2Image_source
+               
               )
-            if 'KR' in selected_sources:
-                # Show the 'sources_chosen' multiselect
-                sources_chosen = st.sidebar.multiselect(
-                    'KR:',
-                    source_data_list,
-                    source_data_list_default
+            if 'text2Image' in selected_sources_image:
+                selected_sources = []
+            else:    
+            # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
+                selected_sources = st.sidebar.multiselect(
+                    'Sources:',
+                    other_sources,
+                    other_sources_default
                 )
-            else:
-                # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
-                sources_chosen = None
+                if 'KR' in selected_sources:
+                    # Show the 'sources_chosen' multiselect
+                    sources_chosen = st.sidebar.multiselect(
+                        'KR:',
+                        source_data_list,
+                        source_data_list_default
+                    )
+                else:
+                    # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
+                    sources_chosen = None
             
-            
-            
-            if len(selected_sources) > 1:
-                summarize = st.sidebar.checkbox("Summarize", value=False, key=None, help='If checked, summarizes content from all sources along with individual responses', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
-            else:
-              
-                summarize = None
-            
-            if 'Website' in selected_sources:
-                print ('website selected in sidebar')
-                website_url = st.sidebar.text_input("Website Url:", key='url', value = '', placeholder='Type URL...', label_visibility="visible") 
-            else:
-                website_url = None
 
-            if 'YouTube' in selected_sources:
-                print ('YouTube selected in sidebar')
-                youtube_url = st.sidebar.text_input("YouTube Url:", key='url', value = '', placeholder='Paste YouTube URL...', label_visibility="visible") 
-            else:
-                youtube_url = None
+                
+            
+                if len(selected_sources) > 1:
+                    summarize = st.sidebar.checkbox("Summarize", value=False, key=None, help='If checked, summarizes content from all sources along with individual responses', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
+                else:
+                
+                    summarize = None
+            
+                if 'Website' in selected_sources:
+                    print ('website selected in sidebar')
+                    website_url = st.sidebar.text_input("Website Url:", key='url', value = '', placeholder='Type URL...', label_visibility="visible") 
+                else:
+                    website_url = None
+
+                if 'YouTube' in selected_sources:
+                    print ('YouTube selected in sidebar')
+                    youtube_url = st.sidebar.text_input("YouTube Url:", key='url', value = '', placeholder='Paste YouTube URL...', label_visibility="visible") 
+                else:
+                    youtube_url = None
     
-    return model_name, persistence_choice, selected_sources, uploaded_files , summarize, website_url, youtube_url,k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category, embedding_model_name
-
-st.set_page_config(
-    page_title="NexgenBot", 
-    page_icon=":arrow_forward:"
+    return (
+        model_name,
+        persistence_choice,
+        selected_sources,
+        uploaded_files,
+        summarize,
+        website_url,
+        youtube_url,
+        k_similarity,
+        sources_chosen,
+        task,
+        upload_kr_docs_button,
+        ingest_source_chosen,
+        source_data_list,
+        source_category,
+        embedding_model_name,
+        selected_sources_image
     )
 
 
-model_name, persistence_choice, selected_sources, uploaded_files, summarize, website_url, youtube_url,  k_similarity, sources_chosen, task, upload_kr_docs_button, ingest_source_chosen, source_data_list, source_category, embedding_model_name = create_sidebar (st)
+
+
+(
+    model_name,
+    persistence_choice,
+    selected_sources,
+    uploaded_files,
+    summarize,
+    website_url,
+    youtube_url,
+    k_similarity,
+    sources_chosen,
+    task,
+    upload_kr_docs_button,
+    ingest_source_chosen,
+    source_data_list,
+    source_category,
+    embedding_model_name,
+    selected_sources_image
+) = create_sidebar(st)
+
 print ("ingest_source_chosen ", ingest_source_chosen)
 if model_name == "GPT-3.5":
     model = "gpt-3.5-turbo"
@@ -256,7 +300,11 @@ if 'generated_wiki' not in st.session_state:
     
 
 if 'all_response_dict' not in st.session_state:
-    st.session_state['all_response_dict'] = []    
+    st.session_state['all_response_dict'] = []   
+if 'current_user' not in st.session_state:
+    st.session_state['current_user'] = "Rajesh5"  
+    
+
 if 'generated_hf' not in st.session_state:
     st.session_state['generated_hf'] = []
 if 'entity_memory' not in st.session_state:
@@ -310,6 +358,41 @@ if (task == 'Query'):
 Conversation = ConversationChain(llm=llm, prompt=ENTITY_MEMORY_CONVERSATION_TEMPLATE, memory=st.session_state['entity_memory'] )
 
 table_name = os.environ['PROCESS_TABLE']
+
+def process_text2image (prompt):
+    import requests
+    from datetime import datetime
+    text2image_model_name = "dall-e-3"
+   
+    # user_prompt = "Generate a high-resolution, realistic image of a Mahindra Thar vehicle in a full and front-facing view. The scene should be captured as if photographed with a Canon high-quality camera. The backdrop should showcase majestic mountains, providing a picturesque setting. Pay attention to details such as lighting, reflections, and shadows to ensure a lifelike representation of the vehicle in this scenic environment."
+    image_sizes = ["1024x1024", "1024x1792", "1792x1024"]
+    # st.write ("Generating image...")
+    response = openai.Image.create(
+        prompt=prompt,
+        model=text2image_model_name,
+        n=1,
+        size=image_sizes[0],
+        quality="standard", 
+    )
+
+    if 'data' in response and response['data']:
+        item = response['data'][0]  # Assuming you want to generate only the first image
+        image_url = item['url']
+        print (image_url)
+        file_name = "image" + datetime.now().strftime('%Y-%m-%d-%H-%M-%S') + ".png"
+        print (image_url)
+            # Create an S3 client
+        aws_region = os.getenv('AWS_DEFAULT_REGION')
+        aws_bucket = os.getenv('S3_PUBLIC_ACCESS')
+        aws_bucket_input_path = os.getenv('S3_PUBLIC_ACCESS_PATH')
+        s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
+        image_data = requests.get(image_url).content
+        s3.put_object(Body=image_data, Bucket=aws_bucket, Key=aws_bucket_input_path + "/" + file_name)
+
+        st.image(image_url, caption="Generated Image", use_column_width=True)
+    else:
+        st.write("No data available to generate an image.")
+    
 def process_Wikipedia2(prompt, llm):
     print("Processing Wikipedia2...", prompt)
     wiki_not_found = "No good Wikipedia Search Result was found in wikipedia"  
@@ -508,32 +591,12 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
     return json_data
 
-text_splitter = CharacterTextSplitter(        
+# text_splitter = CharacterTextSplitter(        
     
-    chunk_size = 1000,
-    chunk_overlap  = 200,
-    length_function = len,
-)
-
-def split_text_chunks(input_text, x):
-    return [input_text[i:i+x] for i in range(0, len(input_text), x)]
-
-def split_text_chunks2(input_text, x, percentage_overlap):
-    overlap = int(x * (percentage_overlap / 100))
-    chunks = []
-
-    start_index = 0
-    while start_index < len(input_text):
-        end_index = start_index + x
-        if end_index > len(input_text):
-            end_index = len(input_text)
-
-        chunk = input_text[start_index:end_index]
-        chunks.append(chunk)
-
-        start_index += x - overlap
-
-    return chunks
+#     chunk_size = 1000,
+#     chunk_overlap  = 200,
+#     length_function = len,
+# )
 
 def process_pdf_file(file_path):
     print ("in process_pdf_file")
@@ -595,8 +658,6 @@ def process_text_file(file_path):
         length_function = len,
     )
     total_chunks = text_splitter.create_documents([text_file])
-
-
     
     if len (total_chunks) > 2000:
         print ('Too many chunks' ,len(total_chunks))
@@ -668,7 +729,6 @@ def process_pptx_file(file_path):
     else:
         print (f'Number of chuncks: {len(chunks)}')
     return chunks
-
 
 def process_bing_search(prompt,llm):
     print ('In process Bing', prompt)
@@ -1049,8 +1109,6 @@ def process_hugging_face2(question):
     json_data = json.dumps(jsondata)  
     return json_data
 
-
-
 def extract_chunks_from_uploaded_file(uploaded_file):
     print('In extract_chunks_from_uploaded_file')
     bytes_data = uploaded_file.read()
@@ -1067,7 +1125,7 @@ def extract_chunks_from_uploaded_file(uploaded_file):
     # Define the target path in S3
     s3_target_path = aws_bucket_input_path + uploaded_file.name
     
-
+    
     # Upload the file to S3
     s3.put_object(Body=bytes_data, Bucket=aws_bucket, Key=s3_target_path)
     
@@ -1092,7 +1150,8 @@ def extract_chunks_from_uploaded_file(uploaded_file):
         raise ValueError(f'Unsupported Filetype: {file_extension}')
 
     return chunks
-def process_chatGPT2(prompt, model, Conversation):
+
+def process_openai(prompt, model, Conversation):
     st.session_state['messages'].append({"role": "user", "content": prompt})
 
     response = Conversation.run(input=prompt)
@@ -1147,7 +1206,6 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
     resp = search_vector_store3 (persistence_choice, vectorstore, prompt, model, "KR", 5)
 
     return resp
-
     
 def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen):
     import json
@@ -1220,7 +1278,7 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
         'Bard': process_bard,
         'Uploads': process_uploaded_file,
         'KR':process_knowledge_base,
-        'Open AI': process_chatGPT2,
+        'Open AI': process_openai,
         'Google':process_google_search,
         'Bing':process_bing_search,
         'Hugging Face':process_hugging_face2,
@@ -1291,6 +1349,7 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
 
 
     return accumulated_json_str
+
 def update_prompt(like_status):
     data = {
         "userName": st.session_state['current_user'],
@@ -1311,13 +1370,17 @@ def update_prompt(like_status):
 def get_response(user_input, source_data_list):
     import json
     print ('In get_response...')
-    total_tokens = 0
-    prompt_tokens = 0
-    completion_tokens = 0
+    
+    if 'text2Image' in selected_sources_image and user_input and goButton:
+        with st.spinner("Generating image..."):
+            with response_container:
+                 process_text2image(user_input)
+    else:  
 
-    if  user_input and len(selected_sources) > 0 and goButton:
+        if  user_input and len(selected_sources) > 0 and goButton:
+          print ("Go pressed")
 
-        with st.spinner("Searching requested sources..."):        
+          with st.spinner("Searching requested sources..."):        
             str_resp = selected_data_sources(selected_sources, user_input, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list)               
             data = json.loads(str_resp)['all_responses']
 
@@ -1421,19 +1484,9 @@ def get_response(user_input, source_data_list):
             st.session_state["all_response_dict"].append (all_response_str)
             st.session_state['generated'].append(all_response_str)
 
-            
-            if model_name == "GPT-3.5":
-                cost = total_tokens * 0.002 / 1000
-            else:
-                cost = (prompt_tokens * 0.03 + completion_tokens * 0.06) / 1000
-
-          
-
             if st.session_state['all_response_dict']:
                 with response_container:
-                    #for i in range(len(st.session_state['all_response_dict'])):
-                    #    message(st.session_state["past"][i], is_user=True, key=str(i) + '_user')
-                    #    message(st.session_state["all_response_dict"][i], key=str(i))
+
                     download_str = []
 
                     latest_index = len(st.session_state['generated']) - 1
@@ -1448,8 +1501,7 @@ def get_response(user_input, source_data_list):
                         st.subheader('Summary from all sources')
                         generated_string = str(st.session_state['generated'][-1])
 
-
-                        summary = process_chatGPT2("Please generate a short summary of the following text in professional words: " + generated_string, model, Conversation)
+                        summary = process_openai("Please generate a short summary of the following text in professional words: " + generated_string, model, Conversation)
 
                         summary_json = json.loads(summary)  # Parse the summary string as JSON
                   
@@ -1458,33 +1510,56 @@ def get_response(user_input, source_data_list):
                         summary_dict.append(response)
                         st.success(summary_dict[0], icon="✅")
                         
-                        # message(summary_dict)
-
 
 response_container = st.container()
 # container for text box
 container = st.container()
 
-with container:
+with container:    
     if (task =='Data Load'):
         if upload_kr_docs_button:
             uploaded_kr = process_uploaded_file( uploaded_files,  persistence_choice, ingest_source_chosen)
             st.write ("Done!")
              
     if (task =='Query'):
-        selected_sources_text = ", ".join(selected_sources)
-        ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
-        user_input = st.text_input(ask_text, key='input', value = '', placeholder='Ask something...', label_visibility="visible") 
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
-        goButton = col1.button("Go")
-        likeButton = col7.button(":+1:")
-        dislikeButton = col8.button(":-1:")
-        if likeButton:
-            print('In Like')
+        
+        if 'text2Image' in selected_sources_image:
+            selected_sources_text = 'text2Image'
+            default_text_value = "Generate a high-resolution image with the exceptional sharpness, clarity, and color fidelity characteristic of a professional photograph taken with a Canon EOS-1D C DSLR Camera. Ensure the image exhibits impeccable details, vibrant colors, and minimal noise, emulating the superior image quality of this renowned camera. Capture the essence of professional photography, with a focus on realistic textures, crisp edges, and accurate representation of lighting. The final output should resemble a masterpiece produced by the Canon EOS-1D C"
+            placeholder_default = None
+            ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
+            user_input = st.text_area(ask_text, height=150, key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
+        else:
+            selected_sources_text = ", ".join(selected_sources)
+            default_text_value = ''
+            placeholder_default = "Ask something..."
+            ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
+            user_input = st.text_input(ask_text,  key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
+        
+        print ("new code")
+        
+        # col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
+        # goButton = col1.button("Go")
+        # likeButton = col7.button(":+1:")
+        # dislikeButton = col8.button(":-1:")
+        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1, 1, 1, 1, 1, 1, 1, 1])
+
+        with col1:
+            goButton = st.button("Go")
+
+        with col7:
+            likeButton = st.button(":+1:")
+
+        with col8:
+            dislikeButton = st.button(":-1:")
+
+        if likeButton:   
             update_prompt("Yes")
-        if dislikeButton:
-            print('In Dislike ')
-            update_prompt("No")        
+
+        if dislikeButton: 
+            update_prompt("No")
+
+       
         get_response (user_input, source_data_list)
         download_str = []
         # Display the conversation history using an expander, and allow the user to download it
@@ -1498,9 +1573,23 @@ with container:
             download_str = '\n'.join(download_str)
             if download_str:
                 st.download_button('Download',download_str)
-    
-    
+        if st.button("Past Queries"):
+            st.write("Getting raw data from dynamoDB...")
+            st.write("Fetching date for:", st.session_state['current_user'])
+            data = {
+                "userName": st.session_state['current_user']
+            }
 
+            lambda_function_name = PROMPT_QUERY_LAMBDA
+            lambda_response = lambda_client.invoke(
+                FunctionName=lambda_function_name,
+                InvocationType='RequestResponse',
+                Payload=json.dumps(data)
+            )
+            response_payload = json.loads(lambda_response['Payload'].read().decode('utf-8'))
+            
+            parsed_data = (response_payload)
+ 
 
-
-
+           
+           
