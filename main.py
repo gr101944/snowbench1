@@ -19,6 +19,9 @@ from langchain.vectorstores import Pinecone
 import pinecone
 
 
+chunk_size = 400
+chunk_overlap = 20
+
 
 from langchain.chains import LLMChain 
 from langchain.agents import load_tools
@@ -491,6 +494,13 @@ def process_CloudAssets(prompt, llm):
 def process_GoogleDocs(prompt, llm):
     print("Processing Google Docs...")
     
+def create_text_splitter(chunk_size, chunk_overlap):
+    return RecursiveCharacterTextSplitter(
+    chunk_size=chunk_size,
+    chunk_overlap=chunk_overlap,
+    length_function=len,
+)
+    
 
 def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity):
     print ('In search_vector_store3', model)
@@ -591,85 +601,6 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
     return json_data
 
-# text_splitter = CharacterTextSplitter(        
-    
-#     chunk_size = 1000,
-#     chunk_overlap  = 200,
-#     length_function = len,
-# )
-
-def process_pdf_file(file_path):
-    print ("in process_pdf_file")
-   
-    chunk_size = 400
-    overlap = 20
-    aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
-    aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
-    aws_region = os.getenv('AWS_DEFAULT_REGION')
-    aws_bucket = os.getenv('S3_BUCKET_NAME')
-    print('Processing PDF, extracting chunks ... ')
-    s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
-
-
-    # Download PDF file from S3
-    response = s3.get_object(Bucket=aws_bucket, Key=file_path)
-
-    pdf_content = response["Body"].read()
-    pdf_stream = io.BytesIO(pdf_content)
-
-    # Create a PDF reader
-    pdf_reader = PyPDF2.PdfReader(pdf_stream)
-
-    # Extract text from each page
-    text_content = []
-    for page_num in range(len(pdf_reader.pages)):
-        page = pdf_reader.pages[page_num]
-        text_content.append(page.extract_text())
-
-       # text = updf.readPDF_text_pdfReader(file_path)
-    text_splitter = RecursiveCharacterTextSplitter(
-    # Set a really small chunk size, just to show.
-        chunk_size = chunk_size ,
-        chunk_overlap  = overlap,
-        length_function = len,
-    )
-    chunks = text_splitter.create_documents(text_content)
-
-
-    if len(chunks) == 0:
-        print ('No chunks extracted')
-        return 0
-    else:
-        print (f'Number of chunks: {len(chunks)}')
-    return chunks
-
-def process_text_file(file_path):
-    print('Processing text')
-    chunk_size = 400
-    overlap = 20
-    
-    with open(file_path) as f:
-        text_file= f.read()
-   
-    text_splitter = RecursiveCharacterTextSplitter(
-    # Set a really small chunk size, just to show.
-        chunk_size = chunk_size ,
-        chunk_overlap  = overlap,
-        length_function = len,
-    )
-    total_chunks = text_splitter.create_documents([text_file])
-    
-    if len (total_chunks) > 2000:
-        print ('Too many chunks' ,len(total_chunks))
-        return
-    if len(total_chunks) == 0:
-        print ('No chunks extracted')
-        return 0
-    else:
-        print (f'Number of chucks: {len(total_chunks)}')
-        print (total_chunks[0])
-    return total_chunks
-
 def process_csv_file(file_path):
     print('Processing CSV')
     loader = UnstructuredFileLoader(file_path)
@@ -677,6 +608,7 @@ def process_csv_file(file_path):
     for doc in docs:
         page_content = doc.page_content
         metadata = doc.metadata
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.split_text(text=page_content)
     if len(chunks) == 0:
         print ('No chunks extracted')
@@ -692,21 +624,7 @@ def process_docx_file(file_path):
     for doc in docs:
         page_content = doc.page_content
         metadata = doc.metadata
-    chunks = text_splitter.split_text(text=page_content)
-    if len(chunks) == 0:
-        print ('No chunks extracted')
-        return 0
-    else:
-        print (f'Number of chuncks: {len(chunks)}')
-    return chunks
-
-def process_excel_file(file_path):
-    print('Processing Excel')
-    loader = UnstructuredExcelLoader(file_path, mode="elements")
-    docs = loader.load()
-    for doc in docs:
-        page_content = doc.page_content
-        metadata = doc.metadata
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.split_text(text=page_content)
     if len(chunks) == 0:
         print ('No chunks extracted')
@@ -717,11 +635,13 @@ def process_excel_file(file_path):
 
 def process_pptx_file(file_path):
     print('Processing PPTX')
+    chunks = "dumy chunks"
     loader = UnstructuredPowerPointLoader(file_path)
     docs = loader.load()
     for doc in docs:
         page_content = doc.page_content
         metadata = doc.metadata
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.split_text(text=page_content)
     if len(chunks) == 0:
         print ('No chunks extracted')
@@ -844,7 +764,7 @@ def process_YTLinks(youtube_video_url, user_input):
     loader = YoutubeLoader.from_youtube_url(youtube_video_url, add_video_info=False)
     
     youtube_transcript_list = loader.load()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=25)
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.split_documents(youtube_transcript_list)
      
     dotenv.load_dotenv(".env")
@@ -1109,6 +1029,97 @@ def process_hugging_face2(question):
     json_data = json.dumps(jsondata)  
     return json_data
 
+
+def process_pdf_file_new(file_content):
+    pdf_stream = io.BytesIO(file_content)
+    pdf_reader = PyPDF2.PdfReader(pdf_stream)
+    text_content = [page.extract_text() for page in pdf_reader.pages]
+
+
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
+
+    chunks = text_splitter.create_documents(text_content)
+
+    return chunks
+
+def process_text_file_new(file_content):
+    print ("In process_file_new")
+    text_content = file_content.decode('utf-8')
+    print ("text_content")
+    print ("-------------")
+    print (text_content)
+
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
+
+    chunks = text_splitter.create_documents([text_content])
+    print (chunks)
+    return chunks
+def process_xlsx_file(file_content):
+    print('Processing Excel')
+    chunks = "chunks dummy"
+    # loader = UnstructuredExcelLoader(file_path, mode="elements")
+    # docs = loader.load()
+    # for doc in docs:
+    #     page_content = doc.page_content
+    #     metadata = doc.metadata
+    # chunks = text_splitter.split_text(text=page_content)
+    # if len(chunks) == 0:
+    #     print ('No chunks extracted')
+    #     return 0
+    # else:
+    #     print (f'Number of chuncks: {len(chunks)}')
+    return chunks
+
+def process_file(file_path):
+    print(f'Rajesh New function Processing file: {file_path}')
+
+    aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+    aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+    aws_region = os.getenv('AWS_DEFAULT_REGION')
+    aws_bucket = os.getenv('S3_BUCKET_NAME')
+
+    s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
+
+    response = s3.get_object(Bucket=aws_bucket, Key=file_path)
+    file_content = b""
+
+    for chunk in response["Body"].iter_chunks():
+        file_content += chunk
+
+    file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
+
+    if file_extension == 'pdf':
+        chunks = process_pdf_file_new(file_content)
+
+    elif file_extension == 'txt':
+        chunks = process_text_file_new(file_content)
+        
+    elif file_extension == 'csv':
+        chunks = process_csv_file(file_content)
+        
+    elif file_extension == 'xlsx':
+        chunks = process_xlsx_file(file_content)
+
+    else:
+        # Handle other file formats if needed
+        print(f'Unsupported file format: {file_extension}')
+        return
+
+    if len(chunks) > 2000:
+        print(f'Too many chunks: {len(chunks)}')
+        return
+
+    if len(chunks) == 0:
+        print('No chunks extracted')
+        return 0
+
+    print(f'Number of chunks: {len(chunks)}')
+    print(chunks[0])
+    return chunks
+
+
+
+
 def extract_chunks_from_uploaded_file(uploaded_file):
     print('In extract_chunks_from_uploaded_file')
     bytes_data = uploaded_file.read()
@@ -1124,6 +1135,7 @@ def extract_chunks_from_uploaded_file(uploaded_file):
 
     # Define the target path in S3
     s3_target_path = aws_bucket_input_path + uploaded_file.name
+    print ("s3_target_path ", s3_target_path)
     
     
     # Upload the file to S3
@@ -1135,15 +1147,21 @@ def extract_chunks_from_uploaded_file(uploaded_file):
         
 
     if file_extension.lower() == '.pdf': 
-        chunks = process_pdf_file(s3_target_path)
+        chunks = process_file(s3_target_path)
+        print ("pdf_chunks:££££ ", len(chunks))
+        # chunks = process_pdf_file(s3_target_path)
+        # print ("    chunks:££££ ", len(chunks))
     elif file_extension.lower() == '.txt':
-        chunks = process_text_file(uploaded_file.name)
+        print ("Processing .txt ***************************")
+        
+        chunks = process_file(s3_target_path)
+        print ("txt_chunks:££££ ", len(chunks))
     elif file_extension.lower() == '.csv':
         chunks = process_csv_file(uploaded_file.name)
     elif file_extension.lower() == '.docx':
         chunks = process_docx_file(uploaded_file.name)
     elif file_extension.lower() == '.xlsx' or file_extension.lower() == '.xls':
-        chunks = process_excel_file(uploaded_file.name)
+        chunks = process_xlsx_file(uploaded_file.name)
     elif file_extension.lower() == '.pptx':
         chunks = process_pptx_file(uploaded_file.name)
     else:
@@ -1587,6 +1605,8 @@ with container:
                 Payload=json.dumps(data)
             )
             response_payload = json.loads(lambda_response['Payload'].read().decode('utf-8'))
+            print (response_payload)
+            st.write("Done. Printed in the log console...")
             
             parsed_data = (response_payload)
  
