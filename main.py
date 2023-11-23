@@ -188,6 +188,7 @@ def create_sidebar (st):
     task = st.sidebar.radio('Choose task:', task_list, help = "Program can both Load Data and perform query", index=0)
     selected_sources = None
     summarize = None
+    vectorize = None
     website_url=  None
     youtube_url = None
     uploaded_files = None
@@ -229,7 +230,7 @@ def create_sidebar (st):
                     # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
                     sources_chosen = None
             
-
+                vectorize = st.sidebar.checkbox("Vectorize", value=True, key=None, help='If checked, the full input would be passed to the model, Use GPT4 32k or better', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
                 
             
                 if len(selected_sources) > 1:
@@ -266,7 +267,8 @@ def create_sidebar (st):
         source_data_list,
         source_category,
         embedding_model_name,
-        selected_sources_image
+        selected_sources_image,
+        vectorize
     )
 
 
@@ -288,7 +290,8 @@ def create_sidebar (st):
     source_data_list,
     source_category,
     embedding_model_name,
-    selected_sources_image
+    selected_sources_image,
+    vectorize
 ) = create_sidebar(st)
 
 print ("ingest_source_chosen ", ingest_source_chosen)
@@ -1278,6 +1281,11 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
 
             except pinecone.exceptions.PineconeException as e:
                 print(f"An error occurred: {str(e)}")
+                
+            # metadata_list = [{"Auth": "Exec"}, {"Access": "Restricted"}] 
+            # docs_chunks_with_metadata = list(zip(docs_chunks, metadata_list))
+            # indexPinecone.upsert(docs_chunks_with_metadata)
+            # print ("Pinecone updated")
         
             docsearch = Pinecone.from_texts([t.page_content for t in docs_chunks], embeddings, index_name=index_name)
            
