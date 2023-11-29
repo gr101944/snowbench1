@@ -5,6 +5,7 @@ import dotenv
 import openai
 import PyPDF2
 import io
+from uuid import uuid4
 import uuid
 
 import tiktoken
@@ -21,6 +22,11 @@ import pinecone
 
 chunk_size = 400
 chunk_overlap = 20
+
+max_bytes = 40000
+max_input_tokens_32k = 30000
+max_input_tokens_64k = 60000
+max_input_tokens_128k = 120000
 
 
 from langchain.chains import LLMChain 
@@ -99,7 +105,244 @@ pinecone.init (
 
 
 memory = ConversationBufferMemory(return_messages=True)
-def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
+user_name_logged = "Rajesh Ghosh"
+if 'curent_user' not in st.session_state:
+    st.session_state['current_user'] = user_name_logged
+if 'curent_promptName' not in st.session_state:
+        st.session_state['curent_promptName'] = []
+
+def create_sidebar (st):
+    # Need to push to env
+
+    st.sidebar.markdown(
+        """
+        <style>
+            img {
+                margin-top: -90px;  /* Adjust this value as needed */
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    image_path = os.path.join(STATIC_ASSEST_BUCKET_URL, STATIC_ASSEST_BUCKET_FOLDER, LOGO_NAME)
+    with st.sidebar:
+        st.image(image_path, width=55)
+    
+
+    source_data_list = [ 'Domain1', 'Domain2', 'Domain3']
+    source_data_list_default = [ 'Domain1']
+    task_list = [ 'Data Load', 'Query']
+    source_category = [ 'Domain1', 'Domain2', 'Domain3']
+    other_sources = ['Open AI', 'YouTube', 'Google', 'KR', 'text2Image']
+    text2Image_source = ['text2Image']
+    other_sources_default = ['KR']
+    embedding_options = ['text-embedding-ada-002']
+    persistence_options = [ 'Vector DB']
+    # 
+    url = "https://www.persistent.com/"
+    
+   
+    with st.sidebar.expander(" 🛠️ Configurations ", expanded=False):
+    # Option to preview memory store
+        model_name  = st.selectbox(label='LLM:', options=['gpt-3.5-turbo','gpt-4', 'gpt-4-1106-preview','gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k'], help='GPT-4 in waiting list 🤨')
+        embedding_model_name  = st.radio('Embedding:', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
+        persistence_choice = st.radio('Persistence', persistence_options, help = "Using Pinecone...")
+        
+        k_similarity_num = st.number_input ("K value",value= 5)
+        k_similarity = int(k_similarity_num)
+        max_output_tokens = st.number_input ("Max Output Tokens",value=512)
+        print("k_similarity ", k_similarity )
+        print("max_output_tokens ", max_output_tokens )
+        print ('persistence_choice ', persistence_choice)    
+        print ('embedding_model_name ', embedding_model_name)   
+    task= None
+    task = st.sidebar.radio('Choose task:', task_list, help = "Program can both Load Data and perform query", index=0)
+    selected_sources = None
+    summarize = None
+    macro_view = None
+    website_url=  None
+    youtube_url = None
+    uploaded_files = None
+    upload_kr_docs_button = None
+    ingest_source_chosen = None
+    sources_chosen = None
+    selected_sources_image = None
+
+    if (task == 'Data Load'):
+            print ('Data Load triggered, assiging ingestion source')
+            ingest_source_chosen = st.radio('Choose :', source_data_list, help = "For loading documents into specific domain")
+            uploaded_files = st.file_uploader('Upload Files Here', accept_multiple_files=True)
+            upload_kr_docs_button = st.button("Upload", key="upload_kr_docs")
+           
+    elif (task == 'Query'):
+            print ('In Query')
+            selected_sources_image = st.sidebar.multiselect(
+                'Image Generation:',
+                text2Image_source
+               
+              )
+            if 'text2Image' in selected_sources_image:
+                selected_sources = []
+            else:    
+            # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
+                selected_sources = st.sidebar.multiselect(
+                    'Sources:',
+                    other_sources,
+                    other_sources_default
+                )
+                if 'KR' in selected_sources:
+                    # Show the 'sources_chosen' multiselect
+                    sources_chosen = st.sidebar.multiselect(
+                        'KR:',
+                        source_data_list,
+                        source_data_list_default
+                    )
+                else:
+                    # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
+                    sources_chosen = None
+                macro_view = st.sidebar.checkbox("Macro View", value=False, key=None, help='If checked, the full input would be passed to the model, Use GPT4 32k or better', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
+                
+                
+            
+                if len(selected_sources) > 1:
+                    summarize = st.sidebar.checkbox("Summarize", value=False, key=None, help='If checked, summarizes content from all sources along with individual responses', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
+                else:
+                
+                    summarize = None
+            
+                if 'Website' in selected_sources:
+                    print ('website selected in sidebar')
+                    website_url = st.sidebar.text_input("Website Url:", key='url', value = '', placeholder='Type URL...', label_visibility="visible") 
+                else:
+                    website_url = None
+
+                if 'YouTube' in selected_sources:
+                    print ('YouTube selected in sidebar')
+                    youtube_url = st.sidebar.text_input("YouTube Url:", key='url', value = '', placeholder='Paste YouTube URL...', label_visibility="visible") 
+                else:
+                    youtube_url = None
+    
+    return (
+        model_name,
+        persistence_choice,
+        selected_sources,
+        uploaded_files,
+        summarize,
+        website_url,
+        youtube_url,
+        k_similarity,
+        sources_chosen,
+        task,
+        upload_kr_docs_button,
+        ingest_source_chosen,
+        source_data_list,
+        source_category,
+        embedding_model_name,
+        selected_sources_image,
+        macro_view,
+        int (max_output_tokens)
+    )
+
+(
+    model_name,
+    persistence_choice,
+    selected_sources,
+    uploaded_files,
+    summarize,
+    website_url,
+    youtube_url,
+    k_similarity,
+    sources_chosen,
+    task,
+    upload_kr_docs_button,
+    ingest_source_chosen,
+    source_data_list,
+    source_category,
+    embedding_model_name,
+    selected_sources_image,
+    macro_view,
+    max_output_tokens
+) = create_sidebar(st)
+print (f'macro_view right after sidebar call {macro_view}')
+def get_max_input_tokens(model_name):
+    model_tokens_mapping = {
+        'gpt-3.5-turbo': 4096,
+        'gpt-4': 8192,
+        'gpt-4-1106-preview': 128000,
+        'gpt-3.5-turbo-1106': 16385,
+        'gpt-3.5-turbo-16k': 16385
+    }
+    return model_tokens_mapping.get(model_name, None)
+def num_tokens_from_string(string: str, encoding_name: str) -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.get_encoding("cl100k_base")
+    encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
+
+model=model_name
+print (model)
+llm = OpenAI(model_name=model, temperature=0.7, max_tokens=max_output_tokens)
+# Initialise session state variables
+if 'generated_wiki' not in st.session_state:
+    st.session_state['generated_wiki'] = []
+    
+
+if 'all_response_dict' not in st.session_state:
+    st.session_state['all_response_dict'] = []   
+
+    
+
+if 'generated_hf' not in st.session_state:
+    st.session_state['generated_hf'] = []
+if 'entity_memory' not in st.session_state:
+    st.session_state['entity_memory'] = ConversationEntityMemory (llm=llm, k=k_similarity)
+if 'generated_openai' not in st.session_state:
+    st.session_state['generated_openai'] = []
+if 'generated_KR' not in st.session_state:
+    st.session_state['generated_KR'] = []
+if 'generated_youtube' not in st.session_state:
+    st.session_state['generated_youtube'] = []
+
+    
+if 'generated_google' not in st.session_state:
+    st.session_state['generated_google'] = []
+if 'generated_bard' not in st.session_state:
+    st.session_state['generated_bard'] = []
+if 'generated_bing' not in st.session_state:
+    st.session_state['generated_bing'] = []    
+if 'generated_website' not in st.session_state:
+    st.session_state['generated_website'] = []
+if 'generated_uploads' not in st.session_state:
+    st.session_state['generated_uploads'] = []
+if 'sel_source' not in st.session_state:
+    st.session_state['sel_source'] = []
+if 'generated' not in st.session_state:
+    st.session_state['generated'] = []
+if 'past' not in st.session_state:
+    st.session_state["past"] = []
+if 'messages' not in st.session_state:
+    st.session_state['messages'] = [
+        {"role": "system", "content": "You are a helpful assistant."}
+    ]
+if 'model_name' not in st.session_state:
+    st.session_state['model_name'] = []
+if 'button_pressed' not in st.session_state:
+    st.session_state['button_pressed'] = []
+    
+    
+if 'cost' not in st.session_state:
+    st.session_state['cost'] = []
+if 'total_tokens' not in st.session_state:
+    st.session_state['total_tokens'] = []
+if 'total_cost' not in st.session_state:
+    st.session_state['total_cost'] = 0.0
+if 'input_text' not in st.session_state:
+    st.session_state['input_text'] = []
+def num_tokens_from_messages(messages, model=model):
     """Return the number of tokens used by a list of messages."""
     try:
         encoding = tiktoken.encoding_for_model(model)
@@ -139,222 +382,6 @@ def num_tokens_from_messages(messages, model="gpt-3.5-turbo-0613"):
     num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
     return num_tokens
 
-def create_sidebar (st):
-    # Need to push to env
-
-    st.sidebar.markdown(
-        """
-        <style>
-            img {
-                margin-top: -90px;  /* Adjust this value as needed */
-            }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-    
-    image_path = os.path.join(STATIC_ASSEST_BUCKET_URL, STATIC_ASSEST_BUCKET_FOLDER, LOGO_NAME)
-    with st.sidebar:
-        st.image(image_path, width=55)
-    
-
-    source_data_list = [ 'KR1']
-    source_data_list_default = [ 'KR1']
-    task_list = [ 'Data Load', 'Query']
-    source_category = ['KR1']
-    other_sources = ['Open AI', 'YouTube', 'Google', 'KR', 'text2Image']
-    text2Image_source = ['text2Image']
-    other_sources_default = ['KR']
-    embedding_options = ['text-embedding-ada-002']
-    persistence_options = [ 'Vector DB']
-    # 
-    url = "https://www.persistent.com/"
-    
-   
-    with st.sidebar.expander(" 🛠️ Configurations ", expanded=False):
-    # Option to preview memory store
-        model_name  = st.selectbox(label='LLM', options=['gpt-3.5-turbo','text-davinci-003'], help='GPT-4 in waiting list 🤨')
-        embedding_model_name  = st.radio('Embedding', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
-        persistence_choice = st.radio('Persistence', persistence_options, help = "Using Pinecone...")
-        
-        k_similarity_text = st.text_input ("K value",type="default",value="5")
-        k_similarity = int(k_similarity_text)
-        max_output_tokens = st.text_input ("Max Output Tokens",type="default",value="512")
-        print("k_similarity ", k_similarity )
-        print("max_output_tokens ", max_output_tokens )
-        print ('persistence_choice ', persistence_choice)    
-        print ('embedding_model_name ', embedding_model_name)   
-    task= None
-    task = st.sidebar.radio('Choose task:', task_list, help = "Program can both Load Data and perform query", index=0)
-    selected_sources = None
-    summarize = None
-    vectorize = None
-    website_url=  None
-    youtube_url = None
-    uploaded_files = None
-    upload_kr_docs_button = None
-    ingest_source_chosen = None
-    sources_chosen = None
-    selected_sources_image = None
-    print ("***********task***************")
-    print (task)
-    if (task == 'Data Load'):
-            print ('Data Load triggered, assiging ingestion source')
-            ingest_source_chosen = st.radio('Choose :', source_data_list, help = "For loading documents into each KR specific FAISS index")
-            uploaded_files = st.file_uploader('Upload Files Here', accept_multiple_files=True)
-            upload_kr_docs_button = st.button("Upload", key="upload_kr_docs")
-    elif (task == 'Query'):
-            print ('In Query')
-            selected_sources_image = st.sidebar.multiselect(
-                'Image Generation:',
-                text2Image_source
-               
-              )
-            if 'text2Image' in selected_sources_image:
-                selected_sources = []
-            else:    
-            # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
-                selected_sources = st.sidebar.multiselect(
-                    'Sources:',
-                    other_sources,
-                    other_sources_default
-                )
-                if 'KR' in selected_sources:
-                    # Show the 'sources_chosen' multiselect
-                    sources_chosen = st.sidebar.multiselect(
-                        'KR:',
-                        source_data_list,
-                        source_data_list_default
-                    )
-                else:
-                    # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
-                    sources_chosen = None
-            
-                vectorize = st.sidebar.checkbox("Vectorize", value=True, key=None, help='If checked, the full input would be passed to the model, Use GPT4 32k or better', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
-                
-            
-                if len(selected_sources) > 1:
-                    summarize = st.sidebar.checkbox("Summarize", value=False, key=None, help='If checked, summarizes content from all sources along with individual responses', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
-                else:
-                
-                    summarize = None
-            
-                if 'Website' in selected_sources:
-                    print ('website selected in sidebar')
-                    website_url = st.sidebar.text_input("Website Url:", key='url', value = '', placeholder='Type URL...', label_visibility="visible") 
-                else:
-                    website_url = None
-
-                if 'YouTube' in selected_sources:
-                    print ('YouTube selected in sidebar')
-                    youtube_url = st.sidebar.text_input("YouTube Url:", key='url', value = '', placeholder='Paste YouTube URL...', label_visibility="visible") 
-                else:
-                    youtube_url = None
-    
-    return (
-        model_name,
-        persistence_choice,
-        selected_sources,
-        uploaded_files,
-        summarize,
-        website_url,
-        youtube_url,
-        k_similarity,
-        sources_chosen,
-        task,
-        upload_kr_docs_button,
-        ingest_source_chosen,
-        source_data_list,
-        source_category,
-        embedding_model_name,
-        selected_sources_image,
-        vectorize
-    )
-
-
-
-
-(
-    model_name,
-    persistence_choice,
-    selected_sources,
-    uploaded_files,
-    summarize,
-    website_url,
-    youtube_url,
-    k_similarity,
-    sources_chosen,
-    task,
-    upload_kr_docs_button,
-    ingest_source_chosen,
-    source_data_list,
-    source_category,
-    embedding_model_name,
-    selected_sources_image,
-    vectorize
-) = create_sidebar(st)
-
-print ("ingest_source_chosen ", ingest_source_chosen)
-if model_name == "GPT-3.5":
-    model = "gpt-3.5-turbo"
-else:
-    model = "gpt-3.5-turbo"
-llm = OpenAI(model_name=model, temperature=0.7, max_tokens=512)
-# Initialise session state variables
-if 'generated_wiki' not in st.session_state:
-    st.session_state['generated_wiki'] = []
-    
-
-if 'all_response_dict' not in st.session_state:
-    st.session_state['all_response_dict'] = []   
-if 'current_user' not in st.session_state:
-    st.session_state['current_user'] = "Rajesh5"  
-    
-
-if 'generated_hf' not in st.session_state:
-    st.session_state['generated_hf'] = []
-if 'entity_memory' not in st.session_state:
-    st.session_state['entity_memory'] = ConversationEntityMemory (llm=llm, k=k_similarity)
-if 'generated_openai' not in st.session_state:
-    st.session_state['generated_openai'] = []
-if 'generated_KR' not in st.session_state:
-    st.session_state['generated_KR'] = []
-if 'generated_youtube' not in st.session_state:
-    st.session_state['generated_youtube'] = []
-
-    
-if 'generated_google' not in st.session_state:
-    st.session_state['generated_google'] = []
-if 'generated_bard' not in st.session_state:
-    st.session_state['generated_bard'] = []
-if 'generated_bing' not in st.session_state:
-    st.session_state['generated_bing'] = []    
-if 'generated_website' not in st.session_state:
-    st.session_state['generated_website'] = []
-if 'generated_uploads' not in st.session_state:
-    st.session_state['generated_uploads'] = []
-if 'sel_source' not in st.session_state:
-    st.session_state['sel_source'] = []
-if 'generated' not in st.session_state:
-    st.session_state['generated'] = []
-if 'past' not in st.session_state:
-    st.session_state["past"] = []
-if 'messages' not in st.session_state:
-    st.session_state['messages'] = [
-        {"role": "system", "content": "You are a helpful assistant."}
-    ]
-if 'model_name' not in st.session_state:
-    st.session_state['model_name'] = []
-if 'cost' not in st.session_state:
-    st.session_state['cost'] = []
-if 'total_tokens' not in st.session_state:
-    st.session_state['total_tokens'] = []
-if 'total_cost' not in st.session_state:
-    st.session_state['total_cost'] = 0.0
-if 'input_text' not in st.session_state:
-    st.session_state['input_text'] = []
-
-
 counter_placeholder = st.sidebar.empty()
 clear_button = None
 #counter_placeholder.write(f"Total cost of this conversation: ${st.session_state['total_cost']:.5f}")
@@ -365,7 +392,7 @@ Conversation = ConversationChain(llm=llm, prompt=ENTITY_MEMORY_CONVERSATION_TEMP
 
 table_name = os.environ['PROCESS_TABLE']
 
-def process_text2image (prompt):
+def process_text2image (promp, promptId_random):
     import requests
     from datetime import datetime
     text2image_model_name = "dall-e-3"
@@ -504,8 +531,17 @@ def create_text_splitter(chunk_size, chunk_overlap):
     length_function=len,
 )
     
+def count_bytes_in_string(input_string):
+    try:
+        byte_count = len(input_string.encode('utf-8'))
+        print(f'The number of bytes in the string is: {byte_count}')
+        return byte_count 
+        
+    except Exception as e:
+        print(f"An error occurred: {e}")
+    
 
-def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity):
+def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity, promptId_random):
     print ('In search_vector_store3', model)
     from langchain.chat_models import ChatOpenAI
     from langchain.callbacks import get_openai_callback
@@ -550,26 +586,23 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         input_tokens = cb.prompt_tokens
         output_tokens = cb.completion_tokens
         cost = round(cb.total_cost, 6)
-        random_string = str(uuid.uuid4())
         
-        user_name_logged = "Rajesh5"
+        
+        
         data = {    
             "userName": user_name_logged,
-            "promptName": "prompt-" + random_string,
+            "promptName": promptId_random,
             "prompt": user_input,
             "completion": response['output_text'],
-            "summary": "summary-from-code",
+            "summary": "No Summary",
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
             "cost": cost,
             "like": ""
         }
-        if 'curent_user' not in st.session_state:
-            st.session_state['current_user'] = []
-        if 'curent_promptName' not in st.session_state:
-                st.session_state['curent_promptName'] = []
+
         st.session_state['current_user'] = user_name_logged
-        st.session_state['curent_promptName'] = "prompt-" + random_string
+        st.session_state['curent_promptName'] = promptId_random
 
         # Invoke the Lambda function
         lambda_function_name = PROMPT_INSERT_LAMBDA
@@ -583,14 +616,14 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         else:
             print ("Success!")
         st.sidebar.write(f"**Usage Info:** ")
+        st.sidebar.write(f"**Model:** {model_name}")
         st.sidebar.write(f"**Input Tokens:** {input_tokens}")
         st.sidebar.write(f"**Output Tokens:** {output_tokens}")
         st.sidebar.write(f"**Cost($):** {cost}")
         # st.write(f"**Input Tokens:** {input_tokens} | **Output Tokens:** {output_tokens} | **Cost:** {cost}")
 
 
-    if "I don't know" in response or response == None:
-       
+    if "I don't know" in response or response == None:       
         st.write('Info not in artefact...') 
     else:
         print ('returning response from upload...')
@@ -652,6 +685,18 @@ def process_pptx_file(file_path):
     else:
         print (f'Number of chuncks: {len(chunks)}')
     return chunks
+
+def process_github(prompt, llm):
+    from langchain.document_loaders import GitLoader
+
+    loader = GitLoader(
+        clone_url="https://github.com/langchain-ai/langchain",
+        repo_path="./example_data/test_repo2/",
+        branch="master",
+    )
+
+    data = loader.load()
+    print (len(data))
 
 def process_bing_search(prompt,llm):
     print ('In process Bing', prompt)
@@ -716,7 +761,7 @@ def process_google_search(prompt,llm):
             description="useful for when you need to answer questions about current events"
         )
     ]
-    prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
+    prefix = """Have a conversation with a human, answering the following questions as best you can. Provide a detailed answer. You have access to the following tools:"""
     suffix = """Begin!"
     {chat_history}
     Question: {input}
@@ -757,13 +802,9 @@ def process_google_search(prompt,llm):
     json_data = json.dumps(data)  
     return json_data
 
-def extract_youtube_id(youtube_url):
-    return youtube_url.split('v=')[-1]
 
 def process_YTLinks(youtube_video_url, user_input):
-    print ('In process_YTLinks New', user_input)      
-
-    youtube_video_id = extract_youtube_id (youtube_video_url)
+    print ('In process_YTLinks New', user_input)   
     loader = YoutubeLoader.from_youtube_url(youtube_video_url, add_video_info=False)
     
     youtube_transcript_list = loader.load()
@@ -920,7 +961,7 @@ def process_hugging_face(question):
     
     repo_id = "tiiuae/falcon-7b-instruct"  # See https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads for some other options
     falcon_llm = HuggingFaceHub(
-        repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": 300}
+        repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": max_output_tokens}
     )
     # --------------------------------------------------------------
     # Create a PromptTemplate and LLMChain
@@ -950,6 +991,42 @@ def process_hugging_face(question):
 
     json_data = json.dumps(data)  
     return json_data
+# def embed_and_upsert_chunks(doc_chunks, index):
+#     # Assuming doc_chunks is a list of chunks in the format you provided
+#     # Ensure the 'values' field in doc_chunks has the correct dimension
+#     # (e.g., if it's a list of vectors of dimension 1536)
+
+#     vectors_with_metadata = []
+#     from langchain.embeddings.openai import OpenAIEmbeddings
+
+#     embed_model_name = embedding_model_name
+#     metadata = {"Auth": "Exec", "Access": "Restricted"} 
+
+#     embed = OpenAIEmbeddings(
+#         model=embed_model_name,
+#         openai_api_key=OPENAI_API_KEY
+#     )
+    
+
+#     for i, chunk in enumerate(doc_chunks):
+#         # Assuming OpenAIEmbeddings is used to embed the text
+#         metadata = {"Auth": "Exec", "Access": "Restricted"}  # Modify this based on your requirements
+#         res = embed.embed_documents(chunk)
+        
+#         # Assuming each chunk has metadata
+        
+        
+#         # Generate a unique ID for each chunk
+#         chunk_id = str(uuid4())
+
+#         vectors_with_metadata.append({
+#             "id": chunk_id,
+#             "values": embedding,  # Convert embedding to a list if needed
+#             "metadata": metadata
+#         })
+
+#     # Upsert chunks with metadata into Pinecone
+#     index.upsert(vectors=vectors_with_metadata)
 
 def extract_english_response(response_dict):
     import re
@@ -1009,7 +1086,7 @@ def process_hugging_face2(question):
     repo_id = "tiiuae/falcon-7b-instruct" 
     
     llm = HuggingFaceHub(
-        repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": 512}
+        repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": max_output_tokens}
     )
     conversation = ConversationChain(
         prompt=PROMPT,
@@ -1033,30 +1110,26 @@ def process_hugging_face2(question):
     return json_data
 
 
-def process_pdf_file_new(file_content):
+def process_pdf_file(file_content):
+    print ('process_pdf_file')
     pdf_stream = io.BytesIO(file_content)
     pdf_reader = PyPDF2.PdfReader(pdf_stream)
+    print ("before text_content")
     text_content = [page.extract_text() for page in pdf_reader.pages]
-
-
-    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
-
-    chunks = text_splitter.create_documents(text_content)
-
-    return chunks
-
-def process_text_file_new(file_content):
-    print ("In process_file_new")
-    text_content = file_content.decode('utf-8')
-    print ("text_content")
-    print ("-------------")
     print (text_content)
-
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
-
-    chunks = text_splitter.create_documents([text_content])
+    chunks = text_splitter.create_documents(text_content)  
     print (chunks)
+    print (len(chunks))     
     return chunks
+    
+def process_text_file_new(file_content):
+    print("In process_file_new")
+    text_content = file_content.decode('utf-8')     
+    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
+    chunks = text_splitter.create_documents([text_content])        
+    return chunks
+    
 def process_xlsx_file(file_content):
     print('Processing Excel')
     chunks = "chunks dummy"
@@ -1092,7 +1165,7 @@ def process_file(file_path):
     file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
 
     if file_extension == 'pdf':
-        chunks = process_pdf_file_new(file_content)
+        chunks = process_pdf_file(file_content)
 
     elif file_extension == 'txt':
         chunks = process_text_file_new(file_content)
@@ -1117,7 +1190,7 @@ def process_file(file_path):
         return 0
 
     print(f'Number of chunks: {len(chunks)}')
-    print(chunks[0])
+   
     return chunks
 
 
@@ -1151,14 +1224,10 @@ def extract_chunks_from_uploaded_file(uploaded_file):
 
     if file_extension.lower() == '.pdf': 
         chunks = process_file(s3_target_path)
-        print ("pdf_chunks:££££ ", len(chunks))
-        # chunks = process_pdf_file(s3_target_path)
-        # print ("    chunks:££££ ", len(chunks))
+        print ("pdf_chunks: ", len(chunks))
     elif file_extension.lower() == '.txt':
-        print ("Processing .txt ***************************")
-        
+        print ("Processing .txt ***************************")        
         chunks = process_file(s3_target_path)
-        print ("txt_chunks:££££ ", len(chunks))
     elif file_extension.lower() == '.csv':
         chunks = process_csv_file(uploaded_file.name)
     elif file_extension.lower() == '.docx':
@@ -1173,9 +1242,11 @@ def extract_chunks_from_uploaded_file(uploaded_file):
     return chunks
 
 def process_openai(prompt, model, Conversation):
+    print ("In process_openai")
     st.session_state['messages'].append({"role": "user", "content": prompt})
-
+    print (prompt)
     response = Conversation.run(input=prompt)
+    print (response)
     st.session_state['messages'].append({"role": "assistant", "content": response})
  
     total_tokens = 0
@@ -1194,7 +1265,7 @@ def process_openai(prompt, model, Conversation):
  
     return json_data
 
-def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_data_list):
+def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_data_list, promptId_random):
     print ('In process_knowledge_base Rajesh to change to get embed model from config ')
     from langchain.embeddings.openai import OpenAIEmbeddings
     
@@ -1223,10 +1294,16 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
     vectorstore = Pinecone(
         index, embed.embed_query, text_field
     )
-    
-    resp = search_vector_store3 (persistence_choice, vectorstore, prompt, model, "KR", 5)
+    # Rajesh change
+    resp = search_vector_store3 (persistence_choice, vectorstore, prompt, model, "KR", k_similarity, promptId_random)
 
     return resp
+
+def text_to_vector(text):
+    # Replace this with the actual code to convert text to vectors using your embedding method
+    # This is a placeholder function
+    # Ensure the vectors have the correct dimension (1536 in this case)
+    return [0.0] * 1536  # Placeholder for a vector of dimension 1536
     
 def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen):
     import json
@@ -1283,15 +1360,27 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
                 print(f"An error occurred: {str(e)}")
                 
             # metadata_list = [{"Auth": "Exec"}, {"Access": "Restricted"}] 
+            # print ("Example chunk")
+            # print (docs_chunks[0])
             # docs_chunks_with_metadata = list(zip(docs_chunks, metadata_list))
             # indexPinecone.upsert(docs_chunks_with_metadata)
             # print ("Pinecone updated")
-        
+            # docs_chunks_with_metadata = [{"id": str(i), "values": text_to_vector(doc.page_content), "metadata": metadata} for i, (doc, metadata) in enumerate(zip(docs_chunks, metadata_list))]
+            # docs_chunks_with_metadata = [{"id": str(i), "values": [float(value) for value in doc.page_content.split()], "metadata": metadata} for i, (doc, metadata) in enumerate(zip(docs_chunks, metadata_list))]
+            # docs_chunks_with_metadata = list(zip(docs_chunks, metadata_list))
+            # print ("done 1")
+            # embed_and_upsert_chunks(docs_chunks, index)
+            # print ("upsert done")
+            # docs_chunks_with_metadata = list(zip([t.page_content for t in docs_chunks], metadata_list))
+            # indexPinecone.upsert(docs_chunks_with_metadata)
             docsearch = Pinecone.from_texts([t.page_content for t in docs_chunks], embeddings, index_name=index_name)
-           
+            num_vectors = indexPinecone.describe_index_stats()
+            num_vectors_cnt = num_vectors.namespaces[''].vector_count
+            print (num_vectors)
+            print (num_vectors_cnt)
             return ingest_source_chosen
 
-def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list):
+def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list, promptId_random):
     print ("In selected_data_sources")
     import json
 
@@ -1328,13 +1417,13 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
                 all_responses.append(json_response)
             elif (element == 'KR'):
                 print ('Processing KR')
-                str_response = selected_elements_functions[element](prompt, model, Conversation, sources_chosen, source_data_list)
+                str_response = selected_elements_functions[element](prompt, model, Conversation, sources_chosen, source_data_list, promptId_random)
             
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
             elif (element == 'Google'):
                 print ('Processing Google')
-                str_response = selected_elements_functions[element](prompt, llm)
+                str_response = selected_elements_functions[element](prompt, llm, promptId_random)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
             elif (element == 'Bard'):
@@ -1354,7 +1443,7 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
                 all_responses.append(json_response)
             elif (element == 'YouTube'):
                 print ('Processing YouTube')
-                str_response = selected_elements_functions[element](youtube_url , prompt)
+                str_response = selected_elements_functions[element](youtube_url , prompt, promptId_random)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
             elif (element == 'Hugging Face'):
@@ -1376,12 +1465,15 @@ def selected_data_sources(selected_elements, prompt, uploaded_files, model, llm,
 
     return accumulated_json_str
 
-def update_prompt(like_status):
+def update_prompt(like_status, comments):
+    print ("In update_prompt")
     data = {
         "userName": st.session_state['current_user'],
         "promptName": st.session_state['curent_promptName'],
-        "like": like_status
+        "like": like_status,
+        "comments": comments
     }
+    print (data)
 
     lambda_function_name = PROMPT_UPDATE_LAMBDA
     lambda_response = lambda_client.invoke(
@@ -1393,21 +1485,21 @@ def update_prompt(like_status):
     if lambda_response['StatusCode'] != 200:
         raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
 
-def get_response(user_input, source_data_list):
+def get_response(user_input, source_data_list, promptId_random):
     import json
     print ('In get_response...')
     
     if 'text2Image' in selected_sources_image and user_input and goButton:
         with st.spinner("Generating image..."):
             with response_container:
-                 process_text2image(user_input)
+                 process_text2image(user_input, promptId_random)
     else:  
 
         if  user_input and len(selected_sources) > 0 and goButton:
           print ("Go pressed")
 
           with st.spinner("Searching requested sources..."):        
-            str_resp = selected_data_sources(selected_sources, user_input, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list)               
+            str_resp = selected_data_sources(selected_sources, user_input, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list, promptId_random)               
             data = json.loads(str_resp)['all_responses']
 
             response_dict = {
@@ -1556,6 +1648,27 @@ with container:
             ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
             user_input = st.text_area(ask_text, height=150, key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
         else:
+            if macro_view:
+                try:
+                    dotenv.load_dotenv(".env")
+                    env_vars = dotenv.dotenv_values()
+                    for key in env_vars:
+                        os.environ[key] = env_vars[key]
+                    pinecone.init (
+                        api_key = os.getenv('PINECONE_API_KEY'),
+                        environment = os.getenv('PINECONE_ENVIRONMENT')   
+                    )
+                    pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
+                    index_name = pinecone_index_name  # Specify the index name as a string
+                    indexPinecone = pinecone.Index(index_name)
+                    num_vectors = indexPinecone.describe_index_stats()
+                    num_vectors_cnt = num_vectors.namespaces[''].vector_count
+                    st.info (f'Macro View selected, set k to {num_vectors_cnt} and choose model with the max context length in settings ' )
+                  
+                except pinecone.exceptions.PineconeException as e:
+                    print(f"An error occurred: {str(e)}")
+                    # Rajesh to come
+                
             selected_sources_text = ", ".join(selected_sources)
             default_text_value = ''
             placeholder_default = "Ask something..."
@@ -1568,37 +1681,49 @@ with container:
         # goButton = col1.button("Go")
         # likeButton = col7.button(":+1:")
         # dislikeButton = col8.button(":-1:")
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns([1, 1, 1, 1, 1, 1, 1, 1])
+
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
         with col1:
             goButton = st.button("Go")
 
-        with col7:
-            likeButton = st.button(":+1:")
+        with col3:
+            likeButton = st.button("Add to Library")       
 
-        with col8:
-            dislikeButton = st.button(":-1:")
+        with col4:
+            dislikeButton = st.button("Improve", type="primary")
+            
+        
+        if likeButton:
+            st.session_state.button_pressed = "Add to Library"
+        if dislikeButton:
+            st.session_state.button_pressed = "Improve"
+        print ("st.session_state.button_pressed ", st.session_state.button_pressed)
+        if st.session_state.button_pressed:
+            print ("Either of the button is pressed")
+            comments = st.text_input("Enter comments:")
+            if st.button("Submit"):
+                print ("Submit pressed")
+                update_prompt(st.session_state.button_pressed, comments)
+                st.info ("Noted")
+                st.session_state.button_pressed = None
 
-        if likeButton:   
-            update_prompt("Yes")
-
-        if dislikeButton: 
-            update_prompt("No")
-
-       
-        get_response (user_input, source_data_list)
-        download_str = []
+        if goButton:
+            random_string = str(uuid.uuid4())
+            promptId_random = "prompt-" + random_string
+            get_response (user_input, source_data_list, promptId_random)
+            download_str = []
         # Display the conversation history using an expander, and allow the user to download it
-        with st.expander("Download Conversation", expanded=False):
-            for i in range(len(st.session_state['generated'])-1, -1, -1):
-                st.info(st.session_state["past"][i],icon="✅")
-                st.success(st.session_state["generated"][i], icon="✅")
-                download_str.append(st.session_state["past"][i])
-                download_str.append(st.session_state["generated"][i])
+            with st.expander("Download Conversation", expanded=False):
+                for i in range(len(st.session_state['generated'])-1, -1, -1):
+                    st.info(st.session_state["past"][i],icon="✅")
+                    st.success(st.session_state["generated"][i], icon="✅")
+                    download_str.append(st.session_state["past"][i])
+                    download_str.append(st.session_state["generated"][i])
  
-            download_str = '\n'.join(download_str)
-            if download_str:
-                st.download_button('Download',download_str)
+                download_str = '\n'.join(download_str)
+                if download_str:
+                    st.download_button('Download',download_str)
         if st.button("Past Queries"):
             st.write("Getting raw data from dynamoDB...")
             st.write("Fetching date for:", st.session_state['current_user'])
