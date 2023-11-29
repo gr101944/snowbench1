@@ -20,8 +20,7 @@ from langchain.vectorstores import Pinecone
 import pinecone
 
 
-chunk_size = 400
-chunk_overlap = 20
+
 
 max_bytes = 40000
 max_input_tokens_32k = 30000
@@ -138,7 +137,7 @@ def create_sidebar (st):
     text2Image_source = ['text2Image']
     other_sources_default = ['KR']
     embedding_options = ['text-embedding-ada-002']
-    persistence_options = [ 'Vector DB']
+    persistence_options = [ 'Pinecone']
     # 
     url = "https://www.persistent.com/"
     
@@ -148,7 +147,8 @@ def create_sidebar (st):
         model_name  = st.selectbox(label='LLM:', options=['gpt-3.5-turbo','gpt-4', 'gpt-4-1106-preview','gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k'], help='GPT-4 in waiting list 🤨')
         embedding_model_name  = st.radio('Embedding:', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
         persistence_choice = st.radio('Persistence', persistence_options, help = "Using Pinecone...")
-        
+        chunk_size = st.number_input ("Chunk Size",value= 400)
+        chunk_overlap = st.number_input ("Chunk Overlap",value= 20)
         k_similarity_num = st.number_input ("K value",value= 5)
         k_similarity = int(k_similarity_num)
         max_output_tokens = st.number_input ("Max Output Tokens",value=512)
@@ -241,7 +241,9 @@ def create_sidebar (st):
         embedding_model_name,
         selected_sources_image,
         macro_view,
-        int (max_output_tokens)
+        int (max_output_tokens),
+        chunk_size,
+        chunk_overlap
     )
 
 (
@@ -262,7 +264,9 @@ def create_sidebar (st):
     embedding_model_name,
     selected_sources_image,
     macro_view,
-    max_output_tokens
+    max_output_tokens,
+    chunk_size,
+    chunk_overlap
 ) = create_sidebar(st)
 print (f'macro_view right after sidebar call {macro_view}')
 def get_max_input_tokens(model_name):
@@ -841,7 +845,7 @@ def process_YTLinks(youtube_video_url, user_input):
 
             embeddings = OpenAIEmbeddings()        
             docsearch = Pinecone.from_texts([t.page_content for t in chunks], embeddings, index_name=index_name)
-            persistence_choice = "Vector DB"
+            persistence_choice = "Pinecone"
             resp = search_vector_store3 (persistence_choice, docsearch, user_input, model, "YouTube", k_similarity)
        
             data_dict = json.loads(resp)
