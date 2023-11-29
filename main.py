@@ -129,10 +129,10 @@ def create_sidebar (st):
         st.image(image_path, width=55)
     
 
-    source_data_list = [ 'Domain1', 'Domain2', 'Domain3']
-    source_data_list_default = [ 'Domain1']
+    source_data_list = [ 'C&SB', 'TE', 'GNT']
+    source_data_list_default = [ 'C&SB']
     task_list = [ 'Data Load', 'Query']
-    source_category = [ 'Domain1', 'Domain2', 'Domain3']
+    source_category = [ 'C&SB', 'TE', 'GNT']
     other_sources = ['Open AI', 'YouTube', 'Google', 'KR', 'text2Image']
     text2Image_source = ['text2Image']
     other_sources_default = ['KR']
@@ -478,9 +478,7 @@ def clear_session():
     st.session_state['generated_uploads'] = []
     st.session_state['generated_hf'] = []
     st.session_state["past"] = []
-    st.session_state["memory_wiki"] = []
-
-    
+    st.session_state["memory_wiki"] = []    
     st.session_state['messages'] = [
         {"role": "system", "content": "You are a helpful assistant."}
     ]
