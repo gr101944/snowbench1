@@ -123,6 +123,12 @@ def create_sidebar (st):
         """,
         unsafe_allow_html=True
     )
+    html_code = """
+        <style>
+            div.row-widget.stRadio > div{flex-direction:row;}
+        </style>
+    """
+    st.markdown(html_code, unsafe_allow_html=True)
     
     image_path = os.path.join(STATIC_ASSEST_BUCKET_URL, STATIC_ASSEST_BUCKET_FOLDER, LOGO_NAME)
     with st.sidebar:
@@ -138,13 +144,14 @@ def create_sidebar (st):
     other_sources_default = ['KR']
     embedding_options = ['text-embedding-ada-002']
     persistence_options = [ 'Pinecone']
+    model_options = ['gpt-3.5-turbo','gpt-4', 'gpt-4-1106-preview','gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k']
     # 
     url = "https://www.persistent.com/"
     
    
     with st.sidebar.expander(" 🛠️ Configurations ", expanded=False):
     # Option to preview memory store
-        model_name  = st.selectbox(label='LLM:', options=['gpt-3.5-turbo','gpt-4', 'gpt-4-1106-preview','gpt-3.5-turbo-1106', 'gpt-3.5-turbo-16k'], help='GPT-4 in waiting list 🤨')
+        model_name  = st.selectbox(label='LLM:', options=model_options, help='GPT-4 in waiting list 🤨')
         embedding_model_name  = st.radio('Embedding:', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
         persistence_choice = st.radio('Persistence', persistence_options, help = "Using Pinecone...")
         chunk_size = st.number_input ("Chunk Size",value= 400)
@@ -152,10 +159,7 @@ def create_sidebar (st):
         k_similarity_num = st.number_input ("K value",value= 5)
         k_similarity = int(k_similarity_num)
         max_output_tokens = st.number_input ("Max Output Tokens",value=512)
-        print("k_similarity ", k_similarity )
-        print("max_output_tokens ", max_output_tokens )
-        print ('persistence_choice ', persistence_choice)    
-        print ('embedding_model_name ', embedding_model_name)   
+ 
     task= None
     task = st.sidebar.radio('Choose task:', task_list, help = "Program can both Load Data and perform query", index=0)
     selected_sources = None
@@ -171,7 +175,7 @@ def create_sidebar (st):
 
     if (task == 'Data Load'):
             print ('Data Load triggered, assiging ingestion source')
-            ingest_source_chosen = st.radio('Choose :', source_data_list, help = "For loading documents into specific domain")
+            ingest_source_chosen = st.radio('Choose Knowledge Repository:', source_data_list, help = "For loading documents into specific domain")
             uploaded_files = st.file_uploader('Upload Files Here', accept_multiple_files=True)
             upload_kr_docs_button = st.button("Upload", key="upload_kr_docs")
            
@@ -202,13 +206,10 @@ def create_sidebar (st):
                     # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
                     sources_chosen = None
                 macro_view = st.sidebar.checkbox("Macro View", value=False, key=None, help='If checked, the full input would be passed to the model, Use GPT4 32k or better', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
-                
-                
-            
+                        
                 if len(selected_sources) > 1:
                     summarize = st.sidebar.checkbox("Summarize", value=False, key=None, help='If checked, summarizes content from all sources along with individual responses', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
-                else:
-                
+                else:                
                     summarize = None
             
                 if 'Website' in selected_sources:
@@ -302,6 +303,10 @@ if 'all_response_dict' not in st.session_state:
 
 if 'generated_hf' not in st.session_state:
     st.session_state['generated_hf'] = []
+if 'feedback_given' not in st.session_state:
+    st.session_state['feedback_given'] = []
+    
+
 if 'entity_memory' not in st.session_state:
     st.session_state['entity_memory'] = ConversationEntityMemory (llm=llm, k=k_similarity)
 if 'generated_openai' not in st.session_state:
@@ -1679,10 +1684,6 @@ with container:
         
         print ("new code")
         
-        # col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
-        # goButton = col1.button("Go")
-        # likeButton = col7.button(":+1:")
-        # dislikeButton = col8.button(":-1:")
 
         col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
@@ -1690,32 +1691,50 @@ with container:
             goButton = st.button("Go")
 
         with col3:
-            likeButton = st.button("Add to Library")       
+            add_to_library = st.button("Add to Library")       
 
         with col4:
-            dislikeButton = st.button("Improve", type="primary")
+            improve_button = st.button("Improve", type="primary")
             
-        
-        if likeButton:
+         
+             
+        if add_to_library:
             st.session_state.button_pressed = "Add to Library"
-        if dislikeButton:
+            st.session_state.feedback_given = False 
+        if improve_button:
             st.session_state.button_pressed = "Improve"
+            st.session_state.feedback_given = False 
         print ("st.session_state.button_pressed ", st.session_state.button_pressed)
-        if st.session_state.button_pressed:
-            print ("Either of the button is pressed")
-            comments = st.text_input("Enter comments:")
-            if st.button("Submit"):
-                print ("Submit pressed")
-                update_prompt(st.session_state.button_pressed, comments)
-                st.info ("Noted")
-                st.session_state.button_pressed = None
+        print ("st.session_state.feedback_given ", st.session_state.feedback_given)
 
+        # Check if any button is pressed and feedback is not given
+        if st.session_state.button_pressed and not st.session_state.feedback_given:
+            print ("Inside If")
+            st.session_state.button_pressed = "Add to Library" if add_to_library else "Improve"
+            # Use a placeholder to hold the dynamic section
+            placeholder = st.empty()
+
+            # Inside the placeholder, create a form for comments
+            with placeholder.form(key='comment_form'):
+                comments = st.text_input("Enter comments:")
+                submit_button = st.form_submit_button("Submit")
+
+            # If the submit button is pressed, handle the submission and clear the placeholder
+            if submit_button:
+                print ("submit pressed")
+                update_prompt(st.session_state.button_pressed, comments)
+                st.info("Noted")
+                st.session_state.feedback_given = True
+                st.session_state.button_pressed= False
+                placeholder.empty()  # This clears the form
+
+    
         if goButton:
             random_string = str(uuid.uuid4())
             promptId_random = "prompt-" + random_string
             get_response (user_input, source_data_list, promptId_random)
             download_str = []
-        # Display the conversation history using an expander, and allow the user to download it
+        # Display the conversation history using an expander, and allow the user to download it.
             with st.expander("Download Conversation", expanded=False):
                 for i in range(len(st.session_state['generated'])-1, -1, -1):
                     st.info(st.session_state["past"][i],icon="✅")
