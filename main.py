@@ -605,7 +605,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
             "inputTokens": input_tokens,
             "outputTokens": output_tokens,
             "cost": cost,
-            "like": ""
+            "feedback": ""
         }
 
         st.session_state['current_user'] = user_name_logged
@@ -1477,7 +1477,7 @@ def update_prompt(like_status, comments):
     data = {
         "userName": st.session_state['current_user'],
         "promptName": st.session_state['curent_promptName'],
-        "like": like_status,
+        "feedback": like_status,
         "comments": comments
     }
     print (data)
@@ -1710,7 +1710,7 @@ with container:
         # Check if any button is pressed and feedback is not given
         if st.session_state.button_pressed and not st.session_state.feedback_given:
             print ("Inside If")
-            st.session_state.button_pressed = "Add to Library" if add_to_library else "Improve"
+            # st.session_state.button_pressed = "Add to Library" if add_to_library else "Improve"
             # Use a placeholder to hold the dynamic section
             placeholder = st.empty()
 
@@ -1745,11 +1745,14 @@ with container:
                 download_str = '\n'.join(download_str)
                 if download_str:
                     st.download_button('Download',download_str)
-        if st.button("Past Queries"):
-            st.write("Getting raw data from dynamoDB...")
-            st.write("Fetching date for:", st.session_state['current_user'])
+        if st.button("Your Library"):
+            add_to_library_str = "Add to Library"
+           
+           
             data = {
-                "userName": st.session_state['current_user']
+                "userName": st.session_state['current_user'],
+               
+
             }
 
             lambda_function_name = PROMPT_QUERY_LAMBDA
@@ -1759,10 +1762,26 @@ with container:
                 Payload=json.dumps(data)
             )
             response_payload = json.loads(lambda_response['Payload'].read().decode('utf-8'))
+            print ("*********************************")
             print (response_payload)
-            st.write("Done. Printed in the log console...")
+            items = response_payload.get("Items", [])
+            import pandas as pd
             
-            parsed_data = (response_payload)
+            if items:
+                st.markdown("Curated prompts saved by <b>{}</b>".format(st.session_state['current_user']), unsafe_allow_html=True)
+                    # Create a Pandas DataFrame
+                df = pd.DataFrame([{"Prompt": item["prompt"]["S"], "Comments": item["comments"]["S"]} for item in items])
+
+                # Display the DataFrame with Streamlit, setting the counter to start from 1
+                st.table(df.assign(Counter=range(1, len(df) + 1)).set_index('Counter'))
+            else:
+                st.write("No items found with 'Add to Library' feedback.")
+
+
+            
+
+
+
  
 
            
