@@ -401,7 +401,7 @@ Conversation = ConversationChain(llm=llm, prompt=ENTITY_MEMORY_CONVERSATION_TEMP
 
 table_name = os.environ['PROCESS_TABLE']
 
-def process_text2image (promp, promptId_random):
+def process_text2image (prompt, promptId_random):
     import requests
     from datetime import datetime
     text2image_model_name = "dall-e-3"
@@ -644,20 +644,47 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
     return json_data
 
-def process_csv_file(file_path):
-    print('Processing CSV')
-    loader = UnstructuredFileLoader(file_path)
-    docs = loader.load()
-    for doc in docs:
-        page_content = doc.page_content
-        metadata = doc.metadata
-    text_splitter = create_text_splitter(chunk_size, chunk_overlap)
-    chunks = text_splitter.split_text(text=page_content)
+def process_csv_file(s3,aws_bucket, file_path):
+    print ("In process_csv_file")
+    import pandas as pd
+    from io import StringIO
+    response = s3.get_object(Bucket=aws_bucket, Key=file_path)
+    status_code = response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+    
+    if status_code == 200:
+        # Read the CSV data from the S3 object
+        csv_string = response['Body'].read().decode('utf-8')
+
+        # Create a pandas DataFrame from the CSV string
+        data_frame = pd.read_csv(StringIO(csv_string))
+        print ("*********************")
+        print (len(data_frame))
+        chunk_size = 50  # This can be made configurable.
+        chunks = []
+
+        for start in range(0, len(data_frame), chunk_size):
+            end = start + chunk_size
+            chunk = data_frame[start:end]
+            # chunks.append( 'page_content=   ' + "'" + chunk.to_string()+ "'")
+            page_content = (
+                f"page_content='{chunk.to_string(index=False)}\n'"
+            )
+            print (page_content)
+            chunks.append(page_content)
+            # chunks.append({"page_content": chunk.to_string()})
+            # print (chunks)
+            # chunks.append(chunk.to_string()) 
+            # print (data_frame)
+        
+        # return data_frame
+    else:
+        print(f"Error getting object {file_path} from bucket {aws_bucket}. Status code: {status_code}")
+        return None
     if len(chunks) == 0:
         print ('No chunks extracted')
         return 0
     else:
-        print (f'Number of chuncks: {len(chunks)}')
+        print (f'Number of chunks: {len(chunks)}')
     return chunks
 
 def process_docx_file(file_path):
@@ -1126,7 +1153,7 @@ def process_pdf_file(file_content):
     print (text_content)
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents(text_content)  
-    print (chunks)
+    print (chunks[0])
     print (len(chunks))     
     return chunks
     
@@ -1134,27 +1161,52 @@ def process_text_file_new(file_content):
     print("In process_file_new")
     text_content = file_content.decode('utf-8')     
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
-    chunks = text_splitter.create_documents([text_content])        
+    chunks = text_splitter.create_documents([text_content])   
+    print (chunks[0])     
     return chunks
     
-def process_xlsx_file(file_content):
-    print('Processing Excel')
-    chunks = "chunks dummy"
-    # loader = UnstructuredExcelLoader(file_path, mode="elements")
-    # docs = loader.load()
-    # for doc in docs:
-    #     page_content = doc.page_content
-    #     metadata = doc.metadata
-    # chunks = text_splitter.split_text(text=page_content)
-    # if len(chunks) == 0:
-    #     print ('No chunks extracted')
-    #     return 0
-    # else:
-    #     print (f'Number of chuncks: {len(chunks)}')
-    return chunks
+def process_xlsx_file(s3,aws_bucket, file_path):
+    print ("In process_xlsx_file")
+    response = s3.get_object(Bucket=aws_bucket, Key=file_path)
+    excel_data = response['Body'].read()
+    from io import BytesIO
+    import pandas as pd
+
+# Use BytesIO to convert the byte stream to a file-like object
+    excel_file = BytesIO(excel_data)
+
+    # Read the Excel file into a pandas DataFrame
+    df = pd.read_excel(excel_file)
+
+    # Now df contains your data as a pandas DataFrame
+    print(df)
+    from pandasai import SmartDataframe
+    from pandasai import SmartDatalake
+    from pandasai.llm import OpenAI
+    llm = OpenAI(api_token=OPENAI_API_KEY)
+    dl = SmartDatalake([df], config={"llm": llm})
+    print ("**********************")
+    print (dl.chat("how many rows are there"))
+    print (dl.chat("what are the action items for 2021"))
+    print ("**********************")
+    
+    # document_instance = xlsx_content[0]
+    # page_content = document_instance.page_content
+
+    # print(page_content)
+
+ 
+    # # text_content = file_content.decode('utf-8')   
+    # print (chunk_size) 
+    # print (chunk_overlap) 
+    # text_splitter = create_text_splitter(chunk_size, chunk_overlap)
+    # chunks = text_splitter.create_documents(page_content)        
+    return df
 
 def process_file(file_path):
     print(f'Rajesh New function Processing file: {file_path}')
+    from io import StringIO
+    import pandas as pd
 
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -1164,10 +1216,17 @@ def process_file(file_path):
     s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
     response = s3.get_object(Bucket=aws_bucket, Key=file_path)
+    
+
+
+
+        
+
     file_content = b""
 
     for chunk in response["Body"].iter_chunks():
         file_content += chunk
+    # print (file_content)
 
     file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
 
@@ -1178,10 +1237,10 @@ def process_file(file_path):
         chunks = process_text_file_new(file_content)
         
     elif file_extension == 'csv':
-        chunks = process_csv_file(file_content)
+        chunks = process_csv_file(s3,aws_bucket, file_path)
         
     elif file_extension == 'xlsx':
-        chunks = process_xlsx_file(file_content)
+        chunks = process_xlsx_file(s3,aws_bucket, file_path)
 
     else:
         # Handle other file formats if needed
@@ -1236,11 +1295,11 @@ def extract_chunks_from_uploaded_file(uploaded_file):
         print ("Processing .txt ***************************")        
         chunks = process_file(s3_target_path)
     elif file_extension.lower() == '.csv':
-        chunks = process_csv_file(uploaded_file.name)
+        chunks = process_csv_file(s3,aws_bucket, s3_target_path)
     elif file_extension.lower() == '.docx':
         chunks = process_docx_file(uploaded_file.name)
     elif file_extension.lower() == '.xlsx' or file_extension.lower() == '.xls':
-        chunks = process_xlsx_file(uploaded_file.name)
+        chunks = process_file(s3_target_path)
     elif file_extension.lower() == '.pptx':
         chunks = process_pptx_file(uploaded_file.name)
     else:
@@ -1745,14 +1804,11 @@ with container:
                 download_str = '\n'.join(download_str)
                 if download_str:
                     st.download_button('Download',download_str)
-        if st.button("Your Library"):
-            add_to_library_str = "Add to Library"
-           
+        if st.button("Your Prompt Library"):
+            add_to_library_str = "Add to Library"           
            
             data = {
-                "userName": st.session_state['current_user'],
-               
-
+                "userName": st.session_state['current_user']
             }
 
             lambda_function_name = PROMPT_QUERY_LAMBDA
@@ -1767,10 +1823,15 @@ with container:
             items = response_payload.get("Items", [])
             import pandas as pd
             
+            
             if items:
                 st.markdown("Curated prompts saved by <b>{}</b>".format(st.session_state['current_user']), unsafe_allow_html=True)
                     # Create a Pandas DataFrame
-                df = pd.DataFrame([{"Prompt": item["prompt"]["S"], "Comments": item["comments"]["S"]} for item in items])
+                df = pd.DataFrame([
+                    {"Prompt": item["prompt"]["S"], "Comments": item["comments"]["S"], "PromptName": item["promptName"]["S"]}
+                    for item in items
+                ])
+
 
                 # Display the DataFrame with Streamlit, setting the counter to start from 1
                 st.table(df.assign(Counter=range(1, len(df) + 1)).set_index('Counter'))
