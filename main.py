@@ -290,7 +290,7 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
 
 model=model_name
 print (model)
-llm = OpenAI(model_name=model, temperature=0.7, max_tokens=max_output_tokens)
+llm = OpenAI(model_name=model, temperature=0, max_tokens=max_output_tokens)
 # Initialise session state variables
 if 'generated_wiki' not in st.session_state:
     st.session_state['generated_wiki'] = []
@@ -550,6 +550,7 @@ def count_bytes_in_string(input_string):
 
 def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity, promptId_random):
     print ('In search_vector_store3', model)
+    print ("k_similarity ", k_similarity)
     from langchain.chat_models import ChatOpenAI
     from langchain.callbacks import get_openai_callback
 
@@ -579,6 +580,7 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
       
     docs = VectorStore.similarity_search(query=result, k=int (k_similarity))
+
     prompt = PromptTemplate(
             input_variables=["chat_history_upload", "user_input", "context"], template=template
     )
@@ -995,7 +997,7 @@ def process_hugging_face(question):
     
     repo_id = "tiiuae/falcon-7b-instruct"  # See https://huggingface.co/models?pipeline_tag=text-generation&sort=downloads for some other options
     falcon_llm = HuggingFaceHub(
-        repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": max_output_tokens}
+        repo_id=repo_id, model_kwargs={"temperature": 0, "max_new_tokens": max_output_tokens}
     )
     # --------------------------------------------------------------
     # Create a PromptTemplate and LLMChain
@@ -1120,7 +1122,7 @@ def process_hugging_face2(question):
     repo_id = "tiiuae/falcon-7b-instruct" 
     
     llm = HuggingFaceHub(
-        repo_id=repo_id, model_kwargs={"temperature": 0.1, "max_new_tokens": max_output_tokens}
+        repo_id=repo_id, model_kwargs={"temperature": 0, "max_new_tokens": max_output_tokens}
     )
     conversation = ConversationChain(
         prompt=PROMPT,
@@ -1565,7 +1567,7 @@ def get_response(user_input, source_data_list, promptId_random):
           print ("Go pressed")
 
           with st.spinner("Searching requested sources..."):        
-            str_resp = selected_data_sources(selected_sources, user_input, uploaded_files, model, llm, Conversation, website_url, sources_chosen, source_data_list, promptId_random)               
+            str_resp = selected_data_sources(selected_sources, user_input, uploaded_files, model_name, llm, Conversation, website_url, sources_chosen, source_data_list, promptId_random)               
             data = json.loads(str_resp)['all_responses']
 
             response_dict = {
@@ -1836,14 +1838,6 @@ with container:
                 # Display the DataFrame with Streamlit, setting the counter to start from 1
                 st.table(df.assign(Counter=range(1, len(df) + 1)).set_index('Counter'))
             else:
-                st.write("No items found with 'Add to Library' feedback.")
-
-
-            
-
-
-
- 
-
-           
+                    st.write("No items found with 'Add to Library' feedback.")
+         
            
