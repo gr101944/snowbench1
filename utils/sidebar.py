@@ -32,10 +32,10 @@ def create_sidebar (st):
     with st.sidebar:
         st.image(image_path, width=55)
     
-    source_data_list = [ 'C&SB', 'TE', 'GNT']
-    source_data_list_default = [ 'C&SB']
+    source_data_list = [ 'Repo1', 'Repo2', 'Repo3']
+    source_data_list_default = [ 'Repo1']
     task_list = [ 'Data Load', 'Query']
-    source_category = [ 'C&SB', 'TE', 'GNT']
+ 
     other_sources = ['Open AI', 'YouTube', 'Google', 'KR', 'text2Image']
     text2Image_source = ['text2Image']
     other_sources_default = ['KR']
@@ -51,8 +51,8 @@ def create_sidebar (st):
         model_name  = st.selectbox(label='LLM:', options=model_options, help='GPT-4 in waiting list 🤨')
         embedding_model_name  = st.radio('Embedding:', options=embedding_options, help='Option to change embedding model, keep in mind to match with the LLM 🤨')
         persistence_choice = st.radio('Persistence', persistence_options, help = "Using Pinecone...")
-        chunk_size = st.number_input ("Chunk Size",value= 400)
-        chunk_overlap = st.number_input ("Chunk Overlap",value= 20)
+        chunk_size = st.number_input ("Chunk Size",value= 1000)
+        chunk_overlap = st.number_input ("Chunk Overlap",value= 100)
         temperature_value = st.slider('Temperature', 0.0, 1.0, 0.1)
         k_similarity_num = st.number_input ("K value",value= 5)
         k_similarity = int(k_similarity_num)
@@ -127,7 +127,6 @@ def create_sidebar (st):
         upload_kr_docs_button,
         ingest_source_chosen,
         source_data_list,
-        source_category,
         embedding_model_name,
         selected_sources_image,
         macro_view,

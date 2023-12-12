@@ -1,5 +1,7 @@
 import streamlit as st
 def initialize_session():
+    if 'memory_hf' not in st.session_state:
+        st.session_state['memory_hf'] = []
     if 'generated_wiki' not in st.session_state:
         st.session_state['generated_wiki'] = [] 
     if 'all_response_dict' not in st.session_state:
@@ -22,10 +24,10 @@ def initialize_session():
         st.session_state['generated_uploads'] = []
     if 'sel_source' not in st.session_state:
         st.session_state['sel_source'] = []
-    if 'generated' not in st.session_state:
-        st.session_state['generated'] = []
-    if 'past' not in st.session_state:
-        st.session_state["past"] = []
+    if 'generated_response' not in st.session_state:
+        st.session_state['generated_response'] = []
+    if 'user_prompts' not in st.session_state:
+        st.session_state["user_prompts"] = []
     if 'messages' not in st.session_state:
         st.session_state['messages'] = [
             {"role": "system", "content": "You are a helpful assistant."}

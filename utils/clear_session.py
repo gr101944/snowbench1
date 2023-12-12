@@ -1,7 +1,7 @@
 import streamlit as st
 def clear_session():
     print ("clear_session")
-    st.session_state['generated'] = []
+    st.session_state['generated_response'] = []
     st.session_state['generated_KR'] = []
     st.session_state['memory_hf'] = []    
     st.session_state['generated_youtube'] = []
@@ -17,7 +17,7 @@ def clear_session():
     st.session_state['generated_google'] = []
     st.session_state['generated_uploads'] = []
     st.session_state['generated_hf'] = []
-    st.session_state["past"] = []
+    st.session_state["user_prompts"] = []
     st.session_state['messages'] = [
         {"role": "system", "content": "You are a helpful assistant."}
     ]

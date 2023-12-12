@@ -8,9 +8,7 @@ import io
 from uuid import uuid4
 import uuid
 
-
 from streamlit_option_menu import option_menu
-
 
 from langchain.llms import OpenAI
 from langchain.chains.question_answering import load_qa_chain
@@ -23,7 +21,6 @@ max_bytes = 40000
 max_input_tokens_32k = 30000
 max_input_tokens_64k = 60000
 max_input_tokens_128k = 120000
-
 
 from langchain.chains import LLMChain 
 from langchain.agents import load_tools
@@ -39,7 +36,7 @@ from langchain.agents import AgentType
 from langchain.agents import ZeroShotAgent, Tool, AgentExecutor
 
 import streamlit as st
-from streamlit_chat import message
+# from streamlit_chat import message
 
 from langchain.document_loaders import UnstructuredFileLoader
 
@@ -52,20 +49,22 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain.document_loaders import YoutubeLoader
 
 from langchain.utilities import WikipediaAPIWrapper
-from langchain import HuggingFaceHub
+
 from langchain.utilities import SerpAPIWrapper
 
 from utils.sidebar import create_sidebar
 from utils.initialize_session import initialize_session
 from utils.clear_session import clear_session
 from processors.process_text2image import process_text2image
+from processors.process_huggingface import process_huggingface
+from processors.process_wikipedia import process_wikipedia
 
 dotenv.load_dotenv(".env")
 env_vars = dotenv.dotenv_values()
 for key in env_vars:
     os.environ[key] = env_vars[key]
 
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+
 SERPAPI_API_KEY=os.getenv('SERPAPI_API_KEY')
 
 aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
@@ -79,7 +78,7 @@ PROMPT_UPDATE_LAMBDA = os.getenv('PROMPT_UPDATE_LAMBDA')
 PROMPT_QUERY_LAMBDA = os.getenv('PROMPT_QUERY_LAMBDA')
 lambda_client = boto3.client('lambda', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
-
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 if OPENAI_API_KEY:
     openai.api_key = OPENAI_API_KEY
 else:
@@ -97,6 +96,7 @@ pinecone.init (
 
 
 memory = ConversationBufferMemory(return_messages=True)
+# Will come from AD
 user_name_logged = "Rajesh Ghosh"
 if 'curent_user' not in st.session_state:
     st.session_state['current_user'] = user_name_logged
@@ -117,7 +117,6 @@ if 'curent_promptName' not in st.session_state:
     upload_kr_docs_button,
     ingest_source_chosen,
     source_data_list,
-    source_category,
     embedding_model_name,
     selected_sources_image,
     macro_view,
@@ -147,29 +146,7 @@ initialize_session()
 
 
     
-def process_Wikipedia(prompt, llm):
-    print("Processing Wikipedia...", prompt)
-    wiki_not_found = "No good Wikipedia Search Result was found in wikipedia"  
-    wikipedia = WikipediaAPIWrapper()
-    tools = load_tools (["wikipedia"], llm=llm)
-    agent = initialize_agent (tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-    wiki_research = agent.run(prompt) 
 
-    if (wiki_research == wiki_not_found):
-        return_code = 400        
-    else:
-        return_code = 200
-    
-        # Create a dictionary to hold the data
-    data = {
-            "source": "Wikipedia",
-            "response": wiki_research,
-            "return_code": return_code
-    }
-    # Convert the dictionary to a JSON string
-    json_data = json.dumps(data)
-
-    return json_data
 
 
 
@@ -192,19 +169,13 @@ def create_text_splitter(chunk_size, chunk_overlap):
     length_function=len,
 )
     
-def count_bytes_in_string(input_string):
-    try:
-        byte_count = len(input_string.encode('utf-8'))
-        print(f'The number of bytes in the string is: {byte_count}')
-        return byte_count 
-        
-    except Exception as e:
-        print(f"An error occurred: {e}")
+
     
 
 def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity, promptId_random):
     print ('In search_vector_store3', model)
     print ("k_similarity ", k_similarity)
+    print ("persistence_choice ", persistence_choice)
     from langchain.chat_models import ChatOpenAI
     from langchain.callbacks import get_openai_callback
 
@@ -231,9 +202,11 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
     total_elements = len(chat_history_upload)
  
     result = ' '.join(chat_history_upload[:n]) if n <= total_elements else ' '.join(chat_history_upload)
+    print (result)
+    print ("before docs")  
+    docs = VectorStore.similarity_search(query=result, k=k_similarity)
+    distinct_file_paths, meta_data_present = extract_distinct_file_paths(docs)
 
-      
-    docs = VectorStore.similarity_search(query=result, k=int (k_similarity))
 
     prompt = PromptTemplate(
             input_variables=["chat_history_upload", "user_input", "context"], template=template
@@ -246,11 +219,10 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
         )
     with get_openai_callback() as cb:
         response  = chain({"input_documents": docs, "user_input": user_input}, return_only_outputs=True)
+        print (response)
         input_tokens = cb.prompt_tokens
         output_tokens = cb.completion_tokens
-        cost = round(cb.total_cost, 6)
-        
-        
+        cost = round(cb.total_cost, 6)        
         
         data = {    
             "userName": user_name_logged,
@@ -288,22 +260,34 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
 
     if "I don't know" in response or response == None:       
         st.write('Info not in artefact...') 
-   
-
-    data = {
+    print ("Checking...")
+    print (distinct_file_paths)
+    print (meta_data_present)
+    if meta_data_present:
+        data = {
+            "source": source,
+            "response": response,
+            "distinct_file_paths" : list (distinct_file_paths )        
+        }
+    else:
+        
+        data = {
             "source": source,
             "response": response
-    }
+                       
+        }
     # Convert the dictionary to a JSON string
     json_data = json.dumps(data)
 
     return json_data
 
-def process_csv_file(s3,aws_bucket, file_path):
+def process_csv_file(file_path):
     print ("In process_csv_file")
     import pandas as pd
     from io import StringIO
-    response = s3.get_object(Bucket=aws_bucket, Key=file_path)
+    aws_bucket = os.getenv('S3_BUCKET_NAME')
+    response = get_from_s3(aws_bucket, file_path)
+  
     status_code = response.get('ResponseMetadata', {}).get('HTTPStatusCode')
     
     if status_code == 200:
@@ -438,7 +422,7 @@ def process_google_search(prompt,llm):
     return json_data
 
 
-def process_YTLinks(youtube_video_url, user_input):
+def process_YTLinks(youtube_video_url, user_input, promptId_random):
     print ('In process_YTLinks New', user_input)   
     loader = YoutubeLoader.from_youtube_url(youtube_video_url, add_video_info=False)
     
@@ -477,9 +461,9 @@ def process_YTLinks(youtube_video_url, user_input):
             embeddings = OpenAIEmbeddings()        
             docsearch = Pinecone.from_texts([t.page_content for t in chunks], embeddings, index_name=index_name)
             persistence_choice = "Pinecone"
-            resp = search_vector_store3 (persistence_choice, docsearch, user_input, model, "YouTube", k_similarity)
+            resp_YT = search_vector_store3 (persistence_choice, docsearch, user_input, model, "YouTube", k_similarity, promptId_random)
        
-            data_dict = json.loads(resp)
+            data_dict = json.loads(resp_YT)
             # Extracting the 'output_text' from the dictionary
             output_text = data_dict['response']['output_text']
 
@@ -492,67 +476,51 @@ def process_YTLinks(youtube_video_url, user_input):
             return json_data
     else:
         print ("too many chunks")
+        
+class Document:
+    def __init__(self, page_content, metadata=None):
+        self.page_content = page_content
+        self.metadata = metadata if metadata is not None else {}
 
+def append_metadata(documents, file_path):
+    for doc in documents:
+        doc.metadata["file_path"] = file_path
+        doc.metadata["access"] = "public"
 
+def print_documents(documents):
+    for doc in documents:
+        print(f"Document(page_content='{doc.page_content}', metadata={doc.metadata}),")
+        
+def extract_distinct_file_paths(documents):
+    file_paths = set()
+    meta_data_present = False
 
-def process_hugging_face(question):
-    print ('In process_hugging_face')
-    import json
-    if 'memory_hf' not in st.session_state:
-        st.session_state['memory_hf'] = ConversationBufferMemory(memory_key="chat_history")
+    for doc in documents:
+        if hasattr(doc, 'metadata') and isinstance(doc.metadata, dict) and "file_path" in doc.metadata:
+            file_paths.add(doc.metadata["file_path"])
+            meta_data_present = True
 
-    from langchain.prompts.prompt import PromptTemplate
+    return file_paths, meta_data_present
 
-    template = """The following is a friendly conversation between a human and an AI. The AI is talkative and provides lots of specific details from its context. If the AI does not know the answer to a question, it truthfully says it does not know.
-
-    Current conversation:
-    {chat_history}
-    Human: {input}
-    AI Assistant:"""
-
-    PROMPT = PromptTemplate(input_variables=["chat_history", "input"], template=template)
-    
-    repo_id = "tiiuae/falcon-7b-instruct" 
-    
-    llm = HuggingFaceHub(
-        repo_id=repo_id, model_kwargs={"temperature": temperature_value, "max_new_tokens": max_output_tokens}
-    )
-    conversationHF = ConversationChain(
-        prompt=PROMPT,
-        llm=llm,
-        verbose=False,
-        memory=st.session_state['memory_hf'] 
-    )
-    response = conversationHF.predict(input=question)
-
-
-    if response is None: 
-
-        response= ("Sorry, no response found")
-
-    jsondata = {
-        "source": "Hugging Face",
-        "response": response
-    }
-
-    json_data = json.dumps(jsondata)  
-    return json_data
-
-
-def process_pdf_file(file_content):
+def process_pdf_file(file_content, file_path):
     print ('process_pdf_file')
     pdf_stream = io.BytesIO(file_content)
     pdf_reader = PyPDF2.PdfReader(pdf_stream)
     text_content = [page.extract_text() for page in pdf_reader.pages]
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents(text_content)  
+    append_metadata(chunks, file_path)
+   
     return chunks
     
-def process_text_file_new(file_content):
+def process_text_file_new(file_content, file_path):
     print("In process_file_new")
+    # print (file_content)
     text_content = file_content.decode('utf-8')     
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
-    chunks = text_splitter.create_documents([text_content])   
+    chunks = text_splitter.create_documents([text_content]) 
+    append_metadata(chunks, file_path)  
+
     return chunks
     
 def process_xlsx_file(s3,aws_bucket, file_path):
@@ -594,10 +562,7 @@ def process_xlsx_file(s3,aws_bucket, file_path):
     return df
 
 def process_file(file_path):
-    print(f'Rajesh New function Processing file: {file_path}')
-    from io import StringIO
-    import pandas as pd
-
+    print(f'Processing file: {file_path}')
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     aws_region = os.getenv('AWS_DEFAULT_REGION')
@@ -616,10 +581,10 @@ def process_file(file_path):
     file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
 
     if file_extension == 'pdf':
-        chunks = process_pdf_file(file_content)
+        chunks = process_pdf_file(file_content, file_path)
 
     elif file_extension == 'txt':
-        chunks = process_text_file_new(file_content)
+        chunks = process_text_file_new(file_content, file_path)
         
     elif file_extension == 'csv':
         chunks = process_csv_file(s3,aws_bucket, file_path)
@@ -644,13 +609,12 @@ def process_file(file_path):
    
     return chunks
 
-def extract_chunks_from_uploaded_file(uploaded_file):
-    print('In extract_chunks_from_uploaded_file')
+def upload_to_s3(bucket_name, uploaded_file):
     bytes_data = uploaded_file.read()
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
     aws_region = os.getenv('AWS_DEFAULT_REGION')
-    aws_bucket = os.getenv('S3_BUCKET_NAME')
+    aws_bucket = bucket_name
     aws_bucket_input_path = os.getenv('S3_BUCKET_INPUT_PATH')
     # Create an S3 client
     s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
@@ -659,8 +623,23 @@ def extract_chunks_from_uploaded_file(uploaded_file):
     s3_target_path = aws_bucket_input_path + uploaded_file.name
 
     s3.put_object(Body=bytes_data, Bucket=aws_bucket, Key=s3_target_path)
-    
+    return s3_target_path
 
+def get_from_s3(bucket_name, path_name):
+
+    aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+    aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
+    aws_region = os.getenv('AWS_DEFAULT_REGION')
+
+    # Create an S3 client
+    s3 = boto3.client("s3", aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
+    response = s3.get_object(Bucket=bucket_name, Key=path_name)
+    return response
+    
+def extract_chunks_from_uploaded_file(uploaded_file):
+    print('In extract_chunks_from_uploaded_file')
+    bucket_name = os.getenv('S3_BUCKET_NAME')
+    s3_target_path = upload_to_s3(bucket_name,uploaded_file)
     # _ is used to ignore the base name of the file
     _, file_extension = os.path.splitext(uploaded_file.name)
         
@@ -672,7 +651,7 @@ def extract_chunks_from_uploaded_file(uploaded_file):
         print ("Processing .txt ")        
         chunks = process_file(s3_target_path)
     elif file_extension.lower() == '.csv':
-        chunks = process_csv_file(s3,aws_bucket, s3_target_path)
+        chunks = process_csv_file(s3_target_path)
     elif file_extension.lower() == '.docx':
         chunks = process_docx_file(uploaded_file.name)
     elif file_extension.lower() == '.xlsx' or file_extension.lower() == '.xls':
@@ -709,10 +688,7 @@ def process_openai(prompt, model, Conversation):
     return json_data
 
 def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_data_list, promptId_random):
-    print ('In process_knowledge_base Rajesh to change to get embed model from config ')
-    from langchain.embeddings.openai import OpenAIEmbeddings
-    
-    model_name = embedding_model_name
+    print ('In process_knowledge_base ')    
     dotenv.load_dotenv(".env")
     env_vars = dotenv.dotenv_values()
     for key in env_vars:
@@ -726,9 +702,9 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
     
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     text_field = "text"
-
+    # Need to refactor Rajesh
     embed = OpenAIEmbeddings(
-        model=model_name,
+        model=embedding_model_name,
         openai_api_key=OPENAI_API_KEY
     )
     index_name = pinecone_index_name
@@ -741,12 +717,6 @@ def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_d
     resp = search_vector_store3 (persistence_choice, vectorstore, prompt, model, "KR", k_similarity, promptId_random)
 
     return resp
-
-def text_to_vector(text):
-    # Replace this with the actual code to convert text to vectors using your embedding method
-    # This is a placeholder function
-    # Ensure the vectors have the correct dimension (1536 in this case)
-    return [0.0] * 1536  # Placeholder for a vector of dimension 1536
     
 def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen):
     import json
@@ -775,18 +745,21 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
                 st.write(f'Processing file {index + 1}: {uploaded_file.name}')            
                 docs_chunks.extend(chunks) 
                 print (f'Total number of chunks : {len(docs_chunks)}')
-                    
+                  
         embeddings = OpenAIEmbeddings()
 
         if ingest_source_chosen in source_data_list:
             print(f'processing {ingest_source_chosen} KR')
-            # Dynamically get the file name based on the user's choice
-            file_name = f"{ingest_source_chosen.lower()}_vector_file_name"
+
             print (f'Number of chunks in docs_chunks {len(docs_chunks)}')
             dotenv.load_dotenv(".env")
             env_vars = dotenv.dotenv_values()
             for key in env_vars:
                 os.environ[key] = env_vars[key]
+                
+            OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+            if OPENAI_API_KEY:
+                openai.api_key = OPENAI_API_KEY
             pinecone.init (
                 api_key = os.getenv('PINECONE_API_KEY'),
                 environment = os.getenv('PINECONE_ENVIRONMENT')   
@@ -801,26 +774,11 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
 
             except pinecone.exceptions.PineconeException as e:
                 print(f"An error occurred: {str(e)}")
-                
-            # metadata_list = [{"Auth": "Exec"}, {"Access": "Restricted"}] 
-            # print ("Example chunk")
-            # print (docs_chunks[0])
-            # docs_chunks_with_metadata = list(zip(docs_chunks, metadata_list))
-            # indexPinecone.upsert(docs_chunks_with_metadata)
-            # print ("Pinecone updated")
-            # docs_chunks_with_metadata = [{"id": str(i), "values": text_to_vector(doc.page_content), "metadata": metadata} for i, (doc, metadata) in enumerate(zip(docs_chunks, metadata_list))]
-            # docs_chunks_with_metadata = [{"id": str(i), "values": [float(value) for value in doc.page_content.split()], "metadata": metadata} for i, (doc, metadata) in enumerate(zip(docs_chunks, metadata_list))]
-            # docs_chunks_with_metadata = list(zip(docs_chunks, metadata_list))
-            # print ("done 1")
-            # embed_and_upsert_chunks(docs_chunks, index)
-            # print ("upsert done")
-            # docs_chunks_with_metadata = list(zip([t.page_content for t in docs_chunks], metadata_list))
-            # indexPinecone.upsert(docs_chunks_with_metadata)
-            docsearch = Pinecone.from_texts([t.page_content for t in docs_chunks], embeddings, index_name=index_name)
-            num_vectors = indexPinecone.describe_index_stats()
-            num_vectors_cnt = num_vectors.namespaces[''].vector_count
-            print (num_vectors)
-            print (num_vectors_cnt)
+
+            vectorstore = Pinecone.from_documents(
+                docs_chunks, embeddings, index_name=index_name
+            )
+            print ("after vector store")
             return ingest_source_chosen
 
 def selected_data_sources(selected_elements, prompt, model, llm, Conversation, sources_chosen, source_data_list, promptId_random):
@@ -830,11 +788,11 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, s
     all_responses = []
     selected_elements_functions = {
        
-        'Wikipedia': process_Wikipedia,       
+        'Wikipedia': process_wikipedia,       
         'KR':process_knowledge_base,
         'Open AI': process_openai,
         'Google':process_google_search,       
-        'Hugging Face':process_hugging_face,
+        'Hugging Face':process_huggingface,
         'YouTube': process_YTLinks,
         
     }
@@ -851,6 +809,7 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, s
                 print ('Processing KR')
                 str_response = selected_elements_functions[element](prompt, model, Conversation, sources_chosen, source_data_list, promptId_random)
                 json_response = json.loads(str_response)
+                print (json_response)
                 all_responses.append(json_response)
                 
             elif (element == 'Google'):
@@ -866,7 +825,7 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, s
                 all_responses.append(json_response)
                 
             elif (element == 'Hugging Face'):
-                str_response = selected_elements_functions[element](prompt)
+                str_response = selected_elements_functions[element](prompt,llm)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
                 
@@ -877,6 +836,7 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, s
             else:
                 print ("check chosen sources")
             accumulated_json = {"all_responses": all_responses}
+            print (accumulated_json)
 
       
 
@@ -916,7 +876,8 @@ def get_response(user_input, source_data_list, promptId_random):
     else:  
 
         if  user_input and len(selected_sources) > 0 and goButton:
-          print ("Go pressed")
+          print ("Number of Sources" , len(selected_sources))
+          print (selected_sources)
 
           with st.spinner("Searching requested sources..."):        
             str_resp = selected_data_sources(selected_sources, user_input, model_name, llm, Conversation, sources_chosen, source_data_list, promptId_random)               
@@ -933,19 +894,22 @@ def get_response(user_input, source_data_list, promptId_random):
             for response in data:
                 source = response['source']
                 if source in selected_sources:
-                  
-                    response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']
+                    
+                    if source == "KR":
+                        response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']['output_text'] + "\n\n" + "Doc Sources: " + ", ".join(response['distinct_file_paths'])
+                    else:                        
+                        response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']
            
-            st.session_state["past"].append(user_input)
-        
+            st.session_state["user_prompts"].append(user_input)        
             st.session_state['sel_source'].append(selected_sources)
-
+            
             wiki_response = response_dict.get('wikipedia_response')
-            kr_response = response_dict.get('kr_response')
+            kr_response = response_dict.get('kr_response')            
             google_response = response_dict.get('google_response')
             openai_response = response_dict.get('open_ai_response')
             huggingface_response = response_dict.get('hugging_face_response')
             youtube_response = response_dict.get('youtube_response')
+            
             all_response_str = ''
 
             if wiki_response:
@@ -972,7 +936,7 @@ def get_response(user_input, source_data_list, promptId_random):
                 print ('kr_response')            
                 st.session_state['generated_KR'].append(kr_response)
                 choice_str = ', '.join(sources_chosen) if sources_chosen else "None selected"
-                all_response_str = all_response_str + "From KR: " + choice_str +  "\n" + "----------------------" + "\n\n" + kr_response['output_text'] + "\n\n"
+                all_response_str = all_response_str + "From KR: " + choice_str +  "\n" + "----------------------" + "\n\n" + kr_response + "\n\n"
                 
             if huggingface_response:
                 st.session_state['generated_hf'].append(huggingface_response)
@@ -983,24 +947,24 @@ def get_response(user_input, source_data_list, promptId_random):
 
            
             st.session_state["all_response_dict"].append (all_response_str)
-            st.session_state['generated'].append(all_response_str)
+            st.session_state['generated_response'].append(all_response_str)
 
             if st.session_state['all_response_dict']:
                 with response_container:
 
                     download_str = []
 
-                    latest_index = len(st.session_state['generated']) - 1
+                    latest_index = len(st.session_state['generated_response']) - 1
 
-                    st.info(st.session_state["past"][latest_index], icon="✅")
-                    st.success(st.session_state["generated"][latest_index], icon="✅")
-                    download_str.append(st.session_state["past"][latest_index])
-                    download_str.append(st.session_state["generated"][latest_index])
+                    st.info(st.session_state["user_prompts"][latest_index], icon="✅")
+                    st.success(st.session_state["generated_response"][latest_index], icon="✅")
+                    download_str.append(st.session_state["user_prompts"][latest_index])
+                    download_str.append(st.session_state["generated_response"][latest_index])
                                    
                     if summarize:
                         summary_dict = []
                         st.subheader('Summary from all sources')
-                        generated_string = str(st.session_state['generated'][-1])
+                        generated_string = str(st.session_state['generated_response'][-1])
 
                         summary = process_openai("Please generate a short summary of the following text in professional words: " + generated_string, model, Conversation)
 
@@ -1104,11 +1068,11 @@ with container:
             download_str = []
         # Display the conversation history using an expander, and allow the user to download it.
             with st.expander("Download Conversation", expanded=False):
-                for i in range(len(st.session_state['generated'])-1, -1, -1):
-                    st.info(st.session_state["past"][i],icon="✅")
-                    st.success(st.session_state["generated"][i], icon="✅")
-                    download_str.append(st.session_state["past"][i])
-                    download_str.append(st.session_state["generated"][i])
+                for i in range(len(st.session_state['generated_response'])-1, -1, -1):
+                    st.info(st.session_state["user_prompts"][i],icon="✅")
+                    st.success(st.session_state["generated_response"][i], icon="✅")
+                    download_str.append(st.session_state["user_prompts"][i])
+                    download_str.append(st.session_state["generated_response"][i])
  
                 download_str = '\n'.join(download_str)
                 if download_str:
