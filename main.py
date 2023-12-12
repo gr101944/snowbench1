@@ -7,6 +7,7 @@ import PyPDF2
 import io
 from uuid import uuid4
 import uuid
+import pandas as pd
 
 from streamlit_option_menu import option_menu
 
@@ -112,11 +113,11 @@ if 'curent_promptName' not in st.session_state:
     summarize,
     youtube_url,
     k_similarity,
-    sources_chosen,
+    kr_repos_chosen,
     task,
     upload_kr_docs_button,
     ingest_source_chosen,
-    source_data_list,
+    kr_repos_list,
     embedding_model_name,
     selected_sources_image,
     macro_view,
@@ -482,10 +483,11 @@ class Document:
         self.page_content = page_content
         self.metadata = metadata if metadata is not None else {}
 
-def append_metadata(documents, file_path):
+def append_metadata(documents, file_path, ingest_source_chosen):
     for doc in documents:
         doc.metadata["file_path"] = file_path
         doc.metadata["access"] = "public"
+        doc.metadata["repo"] = ingest_source_chosen
 
 def print_documents(documents):
     for doc in documents:
@@ -502,7 +504,7 @@ def extract_distinct_file_paths(documents):
 
     return file_paths, meta_data_present
 
-def process_pdf_file(file_content, file_path):
+def process_pdf_file(file_content, file_path, ingest_source_chosen):
     print ('process_pdf_file')
     pdf_stream = io.BytesIO(file_content)
     pdf_reader = PyPDF2.PdfReader(pdf_stream)
@@ -513,13 +515,13 @@ def process_pdf_file(file_content, file_path):
    
     return chunks
     
-def process_text_file_new(file_content, file_path):
+def process_text_file_new(file_content, file_path, ingest_source_chosen):
     print("In process_file_new")
     # print (file_content)
     text_content = file_content.decode('utf-8')     
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents([text_content]) 
-    append_metadata(chunks, file_path)  
+    append_metadata(chunks, file_path, ingest_source_chosen)  
 
     return chunks
     
@@ -561,7 +563,7 @@ def process_xlsx_file(s3,aws_bucket, file_path):
     # chunks = text_splitter.create_documents(page_content)        
     return df
 
-def process_file(file_path):
+def process_file(file_path, ingest_source_chosen):
     print(f'Processing file: {file_path}')
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -581,10 +583,10 @@ def process_file(file_path):
     file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
 
     if file_extension == 'pdf':
-        chunks = process_pdf_file(file_content, file_path)
+        chunks = process_pdf_file(file_content, file_path, ingest_source_chosen)
 
     elif file_extension == 'txt':
-        chunks = process_text_file_new(file_content, file_path)
+        chunks = process_text_file_new(file_content, file_path, ingest_source_chosen)
         
     elif file_extension == 'csv':
         chunks = process_csv_file(s3,aws_bucket, file_path)
@@ -636,7 +638,7 @@ def get_from_s3(bucket_name, path_name):
     response = s3.get_object(Bucket=bucket_name, Key=path_name)
     return response
     
-def extract_chunks_from_uploaded_file(uploaded_file):
+def extract_chunks_from_uploaded_file(uploaded_file, ingest_source_chosen):
     print('In extract_chunks_from_uploaded_file')
     bucket_name = os.getenv('S3_BUCKET_NAME')
     s3_target_path = upload_to_s3(bucket_name,uploaded_file)
@@ -645,11 +647,11 @@ def extract_chunks_from_uploaded_file(uploaded_file):
         
 
     if file_extension.lower() == '.pdf': 
-        chunks = process_file(s3_target_path)
+        chunks = process_file(s3_target_path, ingest_source_chosen)
         print ("pdf_chunks: ", len(chunks))
     elif file_extension.lower() == '.txt':
         print ("Processing .txt ")        
-        chunks = process_file(s3_target_path)
+        chunks = process_file(s3_target_path, ingest_source_chosen)
     elif file_extension.lower() == '.csv':
         chunks = process_csv_file(s3_target_path)
     elif file_extension.lower() == '.docx':
@@ -687,7 +689,7 @@ def process_openai(prompt, model, Conversation):
  
     return json_data
 
-def process_knowledge_base(prompt, model, Conversation, sources_chosen, source_data_list, promptId_random):
+def process_knowledge_base(prompt, model, Conversation, kr_repos_chosen, promptId_random):
     print ('In process_knowledge_base ')    
     dotenv.load_dotenv(".env")
     env_vars = dotenv.dotenv_values()
@@ -736,7 +738,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
                 print ('Check input file extension')
                 return
             print ('Creating chunks...')
-            chunks = extract_chunks_from_uploaded_file(uploaded_file)
+            chunks = extract_chunks_from_uploaded_file(uploaded_file, ingest_source_chosen)
 
             if chunks == 0:
                 print("No chunks extracted from: ", uploaded_file)                    
@@ -748,7 +750,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
                   
         embeddings = OpenAIEmbeddings()
 
-        if ingest_source_chosen in source_data_list:
+        if ingest_source_chosen in kr_repos_list:
             print(f'processing {ingest_source_chosen} KR')
 
             print (f'Number of chunks in docs_chunks {len(docs_chunks)}')
@@ -781,7 +783,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
             print ("after vector store")
             return ingest_source_chosen
 
-def selected_data_sources(selected_elements, prompt, model, llm, Conversation, sources_chosen, source_data_list, promptId_random):
+def selected_data_sources(selected_elements, prompt, model, llm, Conversation, kr_repos_chosen, kr_repos_list, promptId_random):
     print ("In selected_data_sources")
     import json
 
@@ -807,7 +809,7 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, s
                 
             elif (element == 'KR'):
                 print ('Processing KR')
-                str_response = selected_elements_functions[element](prompt, model, Conversation, sources_chosen, source_data_list, promptId_random)
+                str_response = selected_elements_functions[element](prompt, model, Conversation, kr_repos_chosen, promptId_random)
                 json_response = json.loads(str_response)
                 print (json_response)
                 all_responses.append(json_response)
@@ -865,9 +867,9 @@ def update_prompt(like_status, comments):
     if lambda_response['StatusCode'] != 200:
         raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
 
-def get_response(user_input, source_data_list, promptId_random):
+def get_response(user_input, kr_repos_chosen, promptId_random):
     import json
-    print ('In get_response...')
+    print ('In get_response...', kr_repos_chosen)
     
     if 'text2Image' in selected_sources_image and user_input and goButton:
         with st.spinner("Generating image..."):
@@ -880,7 +882,7 @@ def get_response(user_input, source_data_list, promptId_random):
           print (selected_sources)
 
           with st.spinner("Searching requested sources..."):        
-            str_resp = selected_data_sources(selected_sources, user_input, model_name, llm, Conversation, sources_chosen, source_data_list, promptId_random)               
+            str_resp = selected_data_sources(selected_sources, user_input, model_name, llm, Conversation, kr_repos_chosen, kr_repos_list, promptId_random)               
             data = json.loads(str_resp)['all_responses']
 
             response_dict = {
@@ -935,7 +937,7 @@ def get_response(user_input, source_data_list, promptId_random):
             if kr_response:
                 print ('kr_response')            
                 st.session_state['generated_KR'].append(kr_response)
-                choice_str = ', '.join(sources_chosen) if sources_chosen else "None selected"
+                choice_str = ', '.join(kr_repos_chosen) if kr_repos_chosen else "None selected"
                 all_response_str = all_response_str + "From KR: " + choice_str +  "\n" + "----------------------" + "\n\n" + kr_response + "\n\n"
                 
             if huggingface_response:
@@ -983,7 +985,7 @@ container = st.container()
 with container:    
     if (task =='Data Load'):
         if upload_kr_docs_button:
-            uploaded_kr = process_uploaded_file( uploaded_files,  persistence_choice, ingest_source_chosen)
+            uploaded_kr = process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen)
             st.write ("Done!")
              
     if (task =='Query'):
@@ -1022,8 +1024,6 @@ with container:
             ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
             user_input = st.text_input(ask_text,  key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
         
-  
-
         col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
         with col1:
@@ -1042,8 +1042,6 @@ with container:
             st.session_state.button_pressed = "Improve"
             st.session_state.feedback_given = False 
 
-
-        # Check if any button is pressed and feedback is not given
         if st.session_state.button_pressed and not st.session_state.feedback_given:
 
             placeholder = st.empty()
@@ -1064,7 +1062,13 @@ with container:
         if goButton:
             random_string = str(uuid.uuid4())
             promptId_random = "prompt-" + random_string
-            get_response (user_input, source_data_list, promptId_random)
+            print ("kr_repos_list")
+            print (kr_repos_list)
+            print ("kr_repos_chosen")
+            print (kr_repos_chosen)
+            
+            
+            get_response (user_input, kr_repos_chosen, promptId_random)
             download_str = []
         # Display the conversation history using an expander, and allow the user to download it.
             with st.expander("Download Conversation", expanded=False):
@@ -1082,7 +1086,6 @@ with container:
             data = {
                 "userName": st.session_state['current_user']
             }
-
             lambda_function_name = PROMPT_QUERY_LAMBDA
             lambda_response = lambda_client.invoke(
                 FunctionName=lambda_function_name,
@@ -1091,8 +1094,6 @@ with container:
             )
             response_payload = json.loads(lambda_response['Payload'].read().decode('utf-8'))
             items = response_payload.get("Items", [])
-            import pandas as pd
-            
             
             if items:
                 st.markdown("Curated prompts saved by <b>{}</b>".format(st.session_state['current_user']), unsafe_allow_html=True)

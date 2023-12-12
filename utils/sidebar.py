@@ -32,8 +32,8 @@ def create_sidebar (st):
     with st.sidebar:
         st.image(image_path, width=55)
     
-    source_data_list = [ 'Repo1', 'Repo2', 'Repo3']
-    source_data_list_default = [ 'Repo1']
+    kr_repos_list = [ 'Repo1', 'Repo2', 'Repo3']
+    kr_repos_list_default = [ 'Repo1']
     task_list = [ 'Data Load', 'Query']
  
     other_sources = ['Open AI', 'YouTube', 'Google', 'KR', 'text2Image']
@@ -67,12 +67,12 @@ def create_sidebar (st):
     uploaded_files = None
     upload_kr_docs_button = None
     ingest_source_chosen = None
-    sources_chosen = None
+    kr_repos_chosen = None
     selected_sources_image = None
 
     if (task == 'Data Load'):
             print ('Data Load triggered, assiging ingestion source')
-            ingest_source_chosen = st.radio('Choose Knowledge Repository:', source_data_list, help = "For loading documents into specific domain")
+            ingest_source_chosen = st.radio('Choose Knowledge Repository:', kr_repos_list, help = "For loading documents into specific domain")
             uploaded_files = st.file_uploader('Upload Files Here', accept_multiple_files=True)
             upload_kr_docs_button = st.button("Upload", key="upload_kr_docs")
            
@@ -85,22 +85,22 @@ def create_sidebar (st):
             if 'text2Image' in selected_sources_image:
                 selected_sources = []
             else:    
-            # sources_chosen = st.sidebar.multiselect( 'KR:',source_data_list, source_data_list_default )
+           
                 selected_sources = st.sidebar.multiselect(
                     'Sources:',
                     other_sources,
                     other_sources_default
                 )
                 if 'KR' in selected_sources:
-                    # Show the 'sources_chosen' multiselect
-                    sources_chosen = st.sidebar.multiselect(
+                
+                    kr_repos_chosen = st.sidebar.multiselect(
                         'KR:',
-                        source_data_list,
-                        source_data_list_default
+                        kr_repos_list,
+                        kr_repos_list_default
                     )
                 else:
-                    # 'KR' is not selected, so don't show the 'sources_chosen' multiselect
-                    sources_chosen = None
+                  
+                    kr_repos_chosen = None
                 macro_view = st.sidebar.checkbox("Macro View", value=False, key=None, help='If checked, the full input would be passed to the model, Use GPT4 32k or better', on_change=None, args=None, kwargs=None, disabled=False, label_visibility="visible")
                         
                 if len(selected_sources) > 1:
@@ -122,11 +122,11 @@ def create_sidebar (st):
         summarize,
         youtube_url,
         k_similarity,
-        sources_chosen,
+        kr_repos_chosen,
         task,
         upload_kr_docs_button,
         ingest_source_chosen,
-        source_data_list,
+        kr_repos_list,
         embedding_model_name,
         selected_sources_image,
         macro_view,
