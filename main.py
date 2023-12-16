@@ -116,7 +116,7 @@ if 'curent_promptName' not in st.session_state:
     kr_repos_chosen,
     task,
     upload_kr_docs_button,
-    ingest_source_chosen,
+    repo_selected_for_upload,
     kr_repos_list,
     embedding_model_name,
     selected_sources_image,
@@ -124,7 +124,8 @@ if 'curent_promptName' not in st.session_state:
     max_output_tokens,
     chunk_size,
     chunk_overlap,
-    temperature_value
+    temperature_value,
+    show_text_area
 ) = create_sidebar(st)
 print (f'macro_view right after sidebar call {macro_view}')
 
@@ -169,14 +170,52 @@ def create_text_splitter(chunk_size, chunk_overlap):
     chunk_overlap=chunk_overlap,
     length_function=len,
 )
+class Document:
+    def __init__(self, page_content, metadata):
+        self.page_content = page_content
+        self.metadata = metadata
+
+def transform_source_to_target(source_data):
+    matches = source_data.get('matches', [])
+    
+    target_documents = []
+    for match in matches:
+        metadata = match.get('metadata', {})
+        document = Document(page_content=metadata.get('text', ''), metadata={
+            'access': metadata.get('access', ''),
+            'file_path': metadata.get('file_path', ''),
+            'repo': metadata.get('repo', '')
+        })
+        target_documents.append(document)
+    
+    return target_documents
+class Document:
+    def __init__(self, page_content, metadata):
+        self.page_content = page_content
+        self.metadata = metadata
+def extract_distinct_file_paths(documents):
+    file_paths = set()
+    meta_data_present = False
+
+    for doc in documents:
+        if hasattr(doc, 'metadata') and isinstance(doc.metadata, dict) and "file_path" in doc.metadata:
+            file_paths.add(doc.metadata["file_path"])
+            meta_data_present = True
+
+    return file_paths, meta_data_present
+def transform_format_a_to_b(format_a):
+    documents = []
+    for match in format_a['matches']:
+        page_content = match['metadata']['text']
+        metadata = {key: value for key, value in match['metadata'].items() if key != 'text'}
+        documents.append(Document(page_content, metadata))
+    return documents
     
 
+def search_vector_store (persistence_choice, index_name, user_input, model, source, k_similarity, promptId_random, kr_repos_chosen):
+    print ('In search_vector_store', kr_repos_chosen)
     
-
-def search_vector_store3 (persistence_choice, VectorStore, user_input, model, source, k_similarity, promptId_random):
-    print ('In search_vector_store3', model)
-    print ("k_similarity ", k_similarity)
-    print ("persistence_choice ", persistence_choice)
+    
     from langchain.chat_models import ChatOpenAI
     from langchain.callbacks import get_openai_callback
 
@@ -201,12 +240,67 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
     
     
     total_elements = len(chat_history_upload)
+    print ("chat_history_upload")
+    print (chat_history_upload)
  
     result = ' '.join(chat_history_upload[:n]) if n <= total_elements else ' '.join(chat_history_upload)
     print (result)
-    print ("before docs")  
-    docs = VectorStore.similarity_search(query=result, k=k_similarity)
-    distinct_file_paths, meta_data_present = extract_distinct_file_paths(docs)
+    print ("before docs") 
+    dotenv.load_dotenv(".env")
+    env_vars = dotenv.dotenv_values()
+    for key in env_vars:
+        os.environ[key] = env_vars[key]
+    pinecone.init (
+        api_key = os.getenv('PINECONE_API_KEY'),
+        environment = os.getenv('PINECONE_ENVIRONMENT')   
+    )
+    pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
+
+    index_name = pinecone_index_name
+    print (index_name)
+    index = pinecone.Index(index_name)
+    MODEL = "text-embedding-ada-002"
+
+    print (result)
+    prompt_embedding  = openai.Embedding.create(input=result, engine=MODEL)['data'][0]['embedding']
+
+    print ("embedding created")
+    # prompt_embedding = embed.create(input=result, engine=MODEL)['data'][0]['embedding']
+    # prompt_embedding = Pinecone(
+    #     index, embed.embed_query, result
+    # )
+    similarity_search_result = index.query(
+        [prompt_embedding],
+        top_k=k_similarity,
+        filter={
+          "repo": {"$in":kr_repos_chosen}
+        },
+        include_metadata=True
+    )
+    print (similarity_search_result)
+    formatted_documents = transform_format_a_to_b(similarity_search_result)
+    print ("formatted_documents")
+    print (formatted_documents)
+
+    
+
+        
+    # print (res['matches'][0]['metadata']['text'])
+    # Extracting text from the 'matches' list
+    # text_list = [match['metadata']['text'] for match in res['matches']]
+
+    # # Combining the extracted text into a single string (you can modify this based on your needs)
+    # all_text = ' '.join(text_list)
+
+    # Printing the result
+    # print(all_text)
+    # for match in res['matches']:
+    #     print(f"{match['score']:.2f}: {match['metadata']['text']}")
+        # docs_matched = 
+    # print (docs)
+
+    # docs = VectorStore.similarity_search(query=result, k=k_similarity)
+ 
 
 
     prompt = PromptTemplate(
@@ -219,7 +313,8 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
             llm=llm, chain_type="stuff", memory=memory , prompt=prompt
         )
     with get_openai_callback() as cb:
-        response  = chain({"input_documents": docs, "user_input": user_input}, return_only_outputs=True)
+        response  = chain({"input_documents": formatted_documents, "user_input": user_input}, return_only_outputs=True)
+        print ("response**********************************************")
         print (response)
         input_tokens = cb.prompt_tokens
         output_tokens = cb.completion_tokens
@@ -262,13 +357,13 @@ def search_vector_store3 (persistence_choice, VectorStore, user_input, model, so
     if "I don't know" in response or response == None:       
         st.write('Info not in artefact...') 
     print ("Checking...")
-    print (distinct_file_paths)
-    print (meta_data_present)
+    distinct_file_paths, meta_data_present = extract_distinct_file_paths(formatted_documents)
+
     if meta_data_present:
         data = {
             "source": source,
             "response": response,
-            "distinct_file_paths" : list (distinct_file_paths )        
+            "distinct_file_paths" : list (distinct_file_paths )       
         }
     else:
         
@@ -459,10 +554,10 @@ def process_YTLinks(youtube_video_url, user_input, promptId_random):
             except pinecone.exceptions.PineconeException as e:
                 print(f"An error occurred: {str(e)}")
 
-            embeddings = OpenAIEmbeddings()        
-            docsearch = Pinecone.from_texts([t.page_content for t in chunks], embeddings, index_name=index_name)
+            # embeddings = OpenAIEmbeddings()        
+            # docsearch = Pinecone.from_texts([t.page_content for t in chunks], embeddings, index_name=index_name)
             persistence_choice = "Pinecone"
-            resp_YT = search_vector_store3 (persistence_choice, docsearch, user_input, model, "YouTube", k_similarity, promptId_random)
+            resp_YT = search_vector_store (persistence_choice, index_name, user_input, model, "YouTube", k_similarity, promptId_random, kr_repos_chosen)
        
             data_dict = json.loads(resp_YT)
             # Extracting the 'output_text' from the dictionary
@@ -483,28 +578,62 @@ class Document:
         self.page_content = page_content
         self.metadata = metadata if metadata is not None else {}
 
-def append_metadata(documents, file_path, ingest_source_chosen):
+def append_metadata(documents, file_path, repo_selected_for_upload):
     for doc in documents:
         doc.metadata["file_path"] = file_path
         doc.metadata["access"] = "public"
-        doc.metadata["repo"] = ingest_source_chosen
+        doc.metadata["repo"] = repo_selected_for_upload
 
-def print_documents(documents):
-    for doc in documents:
-        print(f"Document(page_content='{doc.page_content}', metadata={doc.metadata}),")
+# def print_documents(documents):
+#     for doc in documents:
+#         print(f"Document(page_content='{doc.page_content}', metadata={doc.metadata}),")
         
-def extract_distinct_file_paths(documents):
-    file_paths = set()
-    meta_data_present = False
+# def extract_distinct_file_paths2(docs):
+#     distinct_file_paths = set()
+#     meta_data_present = False
 
-    for doc in documents:
-        if hasattr(doc, 'metadata') and isinstance(doc.metadata, dict) and "file_path" in doc.metadata:
-            file_paths.add(doc.metadata["file_path"])
-            meta_data_present = True
+#     for match in docs.get('matches', []):
+#         file_path = match.get('metadata', {}).get('file_path', '')
+#         if file_path:
+#             distinct_file_paths.add(file_path)
+#             meta_data_present = True
 
-    return file_paths, meta_data_present
+#     return list(distinct_file_paths), meta_data_present
+        
+# def extract_distinct_file_paths(documents):
+#     file_paths = set()
+#     meta_data_present = False
 
-def process_pdf_file(file_content, file_path, ingest_source_chosen):
+#     for doc in documents:
+#         if hasattr(doc, 'metadata') and isinstance(doc.metadata, dict) and "file_path" in doc.metadata:
+#             file_paths.add(doc.metadata["file_path"])
+#             meta_data_present = True
+
+#     return file_paths, meta_data_present
+
+# def format_file_paths(similarity_matches):
+#     unique_file_paths = set()
+#     formatted_paths = ""
+
+#     for match in similarity_matches.get('matches', []):
+#         meta = match.get('metadata')
+#         if meta and 'file_path' in meta:
+#             file_path = meta['file_path']
+#             if file_path not in unique_file_paths:
+#                 unique_file_paths.add(file_path)
+
+#     has_file_paths = bool(unique_file_paths)
+    
+#     formatted_paths += 'source: '
+#     if len(unique_file_paths) <= 3:
+#         formatted_paths += ', '.join(unique_file_paths)
+#     else:
+#         formatted_paths += ', '.join(list(unique_file_paths)[:3])
+#         formatted_paths += ', more...'
+
+#     return formatted_paths, has_file_paths
+
+def process_pdf_file(file_content, file_path, repo_selected_for_upload):
     print ('process_pdf_file')
     pdf_stream = io.BytesIO(file_content)
     pdf_reader = PyPDF2.PdfReader(pdf_stream)
@@ -515,13 +644,13 @@ def process_pdf_file(file_content, file_path, ingest_source_chosen):
    
     return chunks
     
-def process_text_file_new(file_content, file_path, ingest_source_chosen):
+def process_text_file_new(file_content, file_path, repo_selected_for_upload):
     print("In process_file_new")
     # print (file_content)
     text_content = file_content.decode('utf-8')     
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents([text_content]) 
-    append_metadata(chunks, file_path, ingest_source_chosen)  
+    append_metadata(chunks, file_path, repo_selected_for_upload)  
 
     return chunks
     
@@ -563,7 +692,7 @@ def process_xlsx_file(s3,aws_bucket, file_path):
     # chunks = text_splitter.create_documents(page_content)        
     return df
 
-def process_file(file_path, ingest_source_chosen):
+def process_file(file_path, repo_selected_for_upload):
     print(f'Processing file: {file_path}')
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -583,10 +712,10 @@ def process_file(file_path, ingest_source_chosen):
     file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
 
     if file_extension == 'pdf':
-        chunks = process_pdf_file(file_content, file_path, ingest_source_chosen)
+        chunks = process_pdf_file(file_content, file_path, repo_selected_for_upload)
 
     elif file_extension == 'txt':
-        chunks = process_text_file_new(file_content, file_path, ingest_source_chosen)
+        chunks = process_text_file_new(file_content, file_path, repo_selected_for_upload)
         
     elif file_extension == 'csv':
         chunks = process_csv_file(s3,aws_bucket, file_path)
@@ -638,7 +767,7 @@ def get_from_s3(bucket_name, path_name):
     response = s3.get_object(Bucket=bucket_name, Key=path_name)
     return response
     
-def extract_chunks_from_uploaded_file(uploaded_file, ingest_source_chosen):
+def extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload):
     print('In extract_chunks_from_uploaded_file')
     bucket_name = os.getenv('S3_BUCKET_NAME')
     s3_target_path = upload_to_s3(bucket_name,uploaded_file)
@@ -647,11 +776,11 @@ def extract_chunks_from_uploaded_file(uploaded_file, ingest_source_chosen):
         
 
     if file_extension.lower() == '.pdf': 
-        chunks = process_file(s3_target_path, ingest_source_chosen)
+        chunks = process_file(s3_target_path, repo_selected_for_upload)
         print ("pdf_chunks: ", len(chunks))
     elif file_extension.lower() == '.txt':
         print ("Processing .txt ")        
-        chunks = process_file(s3_target_path, ingest_source_chosen)
+        chunks = process_file(s3_target_path, repo_selected_for_upload)
     elif file_extension.lower() == '.csv':
         chunks = process_csv_file(s3_target_path)
     elif file_extension.lower() == '.docx':
@@ -700,7 +829,6 @@ def process_knowledge_base(prompt, model, Conversation, kr_repos_chosen, promptI
         environment = os.getenv('PINECONE_ENVIRONMENT')   
     )
     pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
-
     
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     text_field = "text"
@@ -710,17 +838,15 @@ def process_knowledge_base(prompt, model, Conversation, kr_repos_chosen, promptI
         openai_api_key=OPENAI_API_KEY
     )
     index_name = pinecone_index_name
-    index = pinecone.Index(index_name)
+    # pinecone_index = pinecone.Index(index_name)
 
-    vectorstore = Pinecone(
-        index, embed.embed_query, text_field
-    )
+ 
     # Rajesh change
-    resp = search_vector_store3 (persistence_choice, vectorstore, prompt, model, "KR", k_similarity, promptId_random)
+    resp = search_vector_store (persistence_choice, index_name, prompt, model, "KR", k_similarity, promptId_random, kr_repos_chosen)
 
     return resp
     
-def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen):
+def process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for_upload):
     import json
     print('in process_uploaded_file')
   
@@ -738,7 +864,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
                 print ('Check input file extension')
                 return
             print ('Creating chunks...')
-            chunks = extract_chunks_from_uploaded_file(uploaded_file, ingest_source_chosen)
+            chunks = extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload)
 
             if chunks == 0:
                 print("No chunks extracted from: ", uploaded_file)                    
@@ -750,8 +876,8 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
                   
         embeddings = OpenAIEmbeddings()
 
-        if ingest_source_chosen in kr_repos_list:
-            print(f'processing {ingest_source_chosen} KR')
+        if repo_selected_for_upload in kr_repos_list:
+            print(f'processing {repo_selected_for_upload} KR')
 
             print (f'Number of chunks in docs_chunks {len(docs_chunks)}')
             dotenv.load_dotenv(".env")
@@ -769,19 +895,16 @@ def process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_cho
             pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
             try:
                 index_name = pinecone_index_name  # Specify the index name as a string
-                indexPinecone = pinecone.Index(index_name)
-                print('Deleting all vectors in Pinecone')
-                indexPinecone.delete(delete_all=True)
-                print('Deleted all vectors in Pinecone')
+                Pinecone.from_documents(
+                    docs_chunks, embeddings, index_name=index_name
+                )
 
             except pinecone.exceptions.PineconeException as e:
                 print(f"An error occurred: {str(e)}")
 
-            vectorstore = Pinecone.from_documents(
-                docs_chunks, embeddings, index_name=index_name
-            )
-            print ("after vector store")
-            return ingest_source_chosen
+
+            print ("Vector Store Loaded!")
+            return repo_selected_for_upload
 
 def selected_data_sources(selected_elements, prompt, model, llm, Conversation, kr_repos_chosen, kr_repos_list, promptId_random):
     print ("In selected_data_sources")
@@ -985,7 +1108,7 @@ container = st.container()
 with container:    
     if (task =='Data Load'):
         if upload_kr_docs_button:
-            uploaded_kr = process_uploaded_file(uploaded_files,  persistence_choice, ingest_source_chosen)
+            uploaded_kr = process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for_upload)
             st.write ("Done!")
              
     if (task =='Query'):
@@ -1022,7 +1145,11 @@ with container:
             default_text_value = ''
             placeholder_default = "Ask something..."
             ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
-            user_input = st.text_input(ask_text,  key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
+            if show_text_area:
+        # Text area for longer prompts
+                user_input = st.text_area(ask_text, placeholder=placeholder_default, height=300)
+            else:
+                user_input = st.text_input(ask_text,  key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
         
         col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
