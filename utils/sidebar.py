@@ -159,6 +159,7 @@ def create_sidebar (st):
     repo_selected_for_upload = None
     kr_repos_chosen = None
     selected_sources_image = None
+    privacy_setting = None
     # Initialize session state variables if they don't exist
     if 'repo_selected_for_upload' not in st.session_state:
         st.session_state['repo_selected_for_upload'] = 'Repo1'
