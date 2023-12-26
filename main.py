@@ -2,7 +2,8 @@ import os
 import boto3
 import json
 import dotenv
-import openai
+# import openai
+from openai import OpenAI
 import PyPDF2
 import io
 from uuid import uuid4
@@ -56,9 +57,15 @@ from langchain.utilities import SerpAPIWrapper
 from utils.sidebar import create_sidebar
 from utils.initialize_session import initialize_session
 from utils.clear_session import clear_session
+from utils.trim_conversation_manage_mem import trim_conversation_history
+from utils.get_num_tokens_from_string import get_num_tokens_from_string
 from processors.process_text2image import process_text2image
 from processors.process_huggingface import process_huggingface
 from processors.process_wikipedia import process_wikipedia
+from processors.process_openai import call_openai
+from processors.process_image_infer import upload_to_s3_refactor, generate_presigned_url, get_inference
+
+
 
 dotenv.load_dotenv(".env")
 env_vars = dotenv.dotenv_values()
@@ -80,10 +87,10 @@ PROMPT_QUERY_LAMBDA = os.getenv('PROMPT_QUERY_LAMBDA')
 lambda_client = boto3.client('lambda', aws_access_key_id=aws_access_key_id, aws_secret_access_key=aws_secret_access_key, region_name=aws_region)
 
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-if OPENAI_API_KEY:
-    openai.api_key = OPENAI_API_KEY
-else:
-    print("OpenAI API key not found. Please make sure you have set the OPENAI_API_KEY environment variable.")
+OPENAI_ORGANIZATION = os.getenv('OPENAI_ORGANIZATION')
+
+client = OpenAI(organization = OPENAI_ORGANIZATION, api_key = OPENAI_API_KEY)
+
 
 if SERPAPI_API_KEY:
     serpapi_api_key = SERPAPI_API_KEY
@@ -101,8 +108,8 @@ memory = ConversationBufferMemory(return_messages=True)
 user_name_logged = "Rajesh Ghosh"
 if 'curent_user' not in st.session_state:
     st.session_state['current_user'] = user_name_logged
-if 'curent_promptName' not in st.session_state:
-        st.session_state['curent_promptName'] = []
+if 'current_promptName' not in st.session_state:
+        st.session_state['current_promptName'] = []
 
 
 (
@@ -125,12 +132,17 @@ if 'curent_promptName' not in st.session_state:
     chunk_size,
     chunk_overlap,
     temperature_value,
-    show_text_area
+    show_text_area,
+    trigger_inference,
+    domain_choice,
+    privacy_setting
+   
 ) = create_sidebar(st)
-print (f'macro_view right after sidebar call {macro_view}')
+# print (f'macro_view right after sidebar call {macro_view}')
+
 
 model=model_name
-print (model)
+
 llm = OpenAI(model_name=model, temperature=temperature_value, max_tokens=max_output_tokens)
 
 clear_button = None
@@ -145,7 +157,67 @@ table_name = os.environ['PROCESS_TABLE']
 # Initialise session state variables
 initialize_session()
 
+# ***************************************************
 
+import tiktoken
+
+def get_num_tokens_from_string(string: str, encoding_name: str) -> int:
+    """Returns the number of tokens in a text string."""
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
+
+def trim_conversation_history(messages, max_messages=10, max_tokens=1000):
+    print ("In trim_conversation_history")
+    
+
+    trimmed_messages = messages[-max_messages:]  # Keep only the last 'max_messages' messages
+
+    total_tokens = 0
+    start_index = 0
+    for i, message in enumerate(reversed(trimmed_messages)):
+        message_tokens = get_num_tokens_from_string(message['content'], 'cl100k_base')
+        total_tokens += message_tokens
+        if total_tokens > max_tokens:
+            start_index = i
+            break
+
+    return trimmed_messages[-start_index:] if start_index > 0 else trimmed_messages
+
+def get_gpt_response(client, model_name, messages, source, domain_choice):
+    print ("In get_gpt_response")
+
+    # Trim the conversation history to manage token and message limits
+    messages = trim_conversation_history(messages)
+    
+    message_content, input_tokens, output_tokens, total_tokens, cost = call_openai(user_name_logged, user_input, model_name, messages, domain_choice)
+
+    
+        
+    data = {
+        "source": source,
+        "response": message_content
+                    
+    }
+
+    # Convert the dictionary to a JSON string
+    try:
+        json_data = json.dumps(data)
+        
+    except TypeError as e:
+        print("TypeError occurred:", e)
+
+    st.sidebar.write(f"**Usage Info:** ")
+    st.sidebar.write(f"**Model:** {model_name}")
+    st.sidebar.write(f"**Input Tokens:** {input_tokens}")
+    st.sidebar.write(f"**Output Tokens:** {output_tokens}")
+    st.sidebar.write(f"**Cost($):** {cost}")
+    st.session_state['current_user'] = user_name_logged
+
+
+    return json_data
+
+# ***************************************************
 
     
 
@@ -170,39 +242,21 @@ def create_text_splitter(chunk_size, chunk_overlap):
     chunk_overlap=chunk_overlap,
     length_function=len,
 )
-class Document:
-    def __init__(self, page_content, metadata):
-        self.page_content = page_content
-        self.metadata = metadata
 
-def transform_source_to_target(source_data):
-    matches = source_data.get('matches', [])
-    
-    target_documents = []
-    for match in matches:
-        metadata = match.get('metadata', {})
-        document = Document(page_content=metadata.get('text', ''), metadata={
-            'access': metadata.get('access', ''),
-            'file_path': metadata.get('file_path', ''),
-            'repo': metadata.get('repo', '')
-        })
-        target_documents.append(document)
-    
-    return target_documents
 class Document:
     def __init__(self, page_content, metadata):
         self.page_content = page_content
         self.metadata = metadata
 def extract_distinct_file_paths(documents):
     file_paths = set()
-    meta_data_present = False
+    metadata_present = False
 
     for doc in documents:
         if hasattr(doc, 'metadata') and isinstance(doc.metadata, dict) and "file_path" in doc.metadata:
             file_paths.add(doc.metadata["file_path"])
-            meta_data_present = True
+            metadata_present = True
 
-    return file_paths, meta_data_present
+    return file_paths, metadata_present
 def transform_format_a_to_b(format_a):
     documents = []
     for match in format_a['matches']:
@@ -210,16 +264,21 @@ def transform_format_a_to_b(format_a):
         metadata = {key: value for key, value in match['metadata'].items() if key != 'text'}
         documents.append(Document(page_content, metadata))
     return documents
+
+def get_embedding(text, model="text-embedding-ada-002"):
+   from openai import OpenAI
+   client = OpenAI(organization = OPENAI_ORGANIZATION, api_key = OPENAI_API_KEY)
+   text = text.replace("\n", " ")
+   return client.embeddings.create(input = [text], model=model).data[0].embedding
+
+
     
 
-def search_vector_store (persistence_choice, index_name, user_input, model, source, k_similarity, promptId_random, kr_repos_chosen):
-    print ('In search_vector_store', kr_repos_chosen)
-    
-    
-    from langchain.chat_models import ChatOpenAI
+def search_vector_store (persistence_choice, index_name, user_input, model, source, k_similarity, kr_repos_chosen, domain_choice):
+    print ('In search_vector_store', kr_repos_chosen)    
     from langchain.callbacks import get_openai_callback
 
-    if 'chat_history_upload' not in st.session_state:
+    if 'chat_history_upload' not in st.session_state:   
         st.session_state['chat_history_upload'] = []
         
     st.session_state['chat_history_upload'].append (user_input)
@@ -237,15 +296,10 @@ def search_vector_store (persistence_choice, index_name, user_input, model, sour
         Chatbot:"""
     
     n = 4  # Replace with the desired value of n
-    
-    
+        
     total_elements = len(chat_history_upload)
-    print ("chat_history_upload")
-    print (chat_history_upload)
- 
     result = ' '.join(chat_history_upload[:n]) if n <= total_elements else ' '.join(chat_history_upload)
     print (result)
-    print ("before docs") 
     dotenv.load_dotenv(".env")
     env_vars = dotenv.dotenv_values()
     for key in env_vars:
@@ -257,18 +311,13 @@ def search_vector_store (persistence_choice, index_name, user_input, model, sour
     pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
 
     index_name = pinecone_index_name
-    print (index_name)
+    
     index = pinecone.Index(index_name)
     MODEL = "text-embedding-ada-002"
 
-    print (result)
-    prompt_embedding  = openai.Embedding.create(input=result, engine=MODEL)['data'][0]['embedding']
+    prompt_embedding = get_embedding (result,model=MODEL)
+    
 
-    print ("embedding created")
-    # prompt_embedding = embed.create(input=result, engine=MODEL)['data'][0]['embedding']
-    # prompt_embedding = Pinecone(
-    #     index, embed.embed_query, result
-    # )
     similarity_search_result = index.query(
         [prompt_embedding],
         top_k=k_similarity,
@@ -277,103 +326,58 @@ def search_vector_store (persistence_choice, index_name, user_input, model, sour
         },
         include_metadata=True
     )
-    print (similarity_search_result)
-    formatted_documents = transform_format_a_to_b(similarity_search_result)
-    print ("formatted_documents")
-    print (formatted_documents)
-
     
+    formatted_documents = transform_format_a_to_b(similarity_search_result)
+    source_knowledge = "\n".join([x.page_content for x in formatted_documents])
+    # feed into an augmented prompt
+    augmented_prompt = f"""Using the contexts below, answer the query.
 
-        
-    # print (res['matches'][0]['metadata']['text'])
-    # Extracting text from the 'matches' list
-    # text_list = [match['metadata']['text'] for match in res['matches']]
+    Contexts:
+    {source_knowledge}
 
-    # # Combining the extracted text into a single string (you can modify this based on your needs)
-    # all_text = ' '.join(text_list)
-
-    # Printing the result
-    # print(all_text)
-    # for match in res['matches']:
-    #     print(f"{match['score']:.2f}: {match['metadata']['text']}")
-        # docs_matched = 
-    # print (docs)
-
-    # docs = VectorStore.similarity_search(query=result, k=k_similarity)
- 
-
-
-    prompt = PromptTemplate(
-            input_variables=["chat_history_upload", "user_input", "context"], template=template
+    Query: {result}"""
+    
+    from langchain.schema import (
+        SystemMessage,
+        HumanMessage,
+        AIMessage
     )
-   
-    memory = ConversationBufferMemory(memory_key="chat_history_upload", input_key="user_input")
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant"},
+  
+    ]
+    
+    userMessage = {"role": "user", "content": augmented_prompt}
+       
+    messages.append(userMessage)
 
-    chain = load_qa_chain(
-            llm=llm, chain_type="stuff", memory=memory , prompt=prompt
-        )
-    with get_openai_callback() as cb:
-        response  = chain({"input_documents": formatted_documents, "user_input": user_input}, return_only_outputs=True)
-        print ("response**********************************************")
-        print (response)
-        input_tokens = cb.prompt_tokens
-        output_tokens = cb.completion_tokens
-        cost = round(cb.total_cost, 6)        
-        
-        data = {    
-            "userName": user_name_logged,
-            "promptName": promptId_random,
-            "prompt": user_input,
-            "completion": response['output_text'],
-            "summary": "No Summary",
-            "inputTokens": input_tokens,
-            "outputTokens": output_tokens,
-            "cost": cost,
-            "feedback": ""
-        }
+    message_content, input_tokens, output_tokens, total_tokens, cost = call_openai(user_name_logged, user_input, model_name, messages, domain_choice)
+    distinct_file_paths, metadata_present = extract_distinct_file_paths(formatted_documents)
 
-        st.session_state['current_user'] = user_name_logged
-        st.session_state['curent_promptName'] = promptId_random
-
-        # Invoke the Lambda function
-        lambda_function_name = PROMPT_INSERT_LAMBDA
-        lambda_response = lambda_client.invoke(
-            FunctionName=lambda_function_name,
-            InvocationType='RequestResponse',  # Use 'Event' for asynchronous invocation
-            Payload=json.dumps(data)
-        )
-        if lambda_response['StatusCode'] != 200:
-            raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
-        else:
-            print ("Success calling lambda!")
-        st.sidebar.write(f"**Usage Info:** ")
-        st.sidebar.write(f"**Model:** {model_name}")
-        st.sidebar.write(f"**Input Tokens:** {input_tokens}")
-        st.sidebar.write(f"**Output Tokens:** {output_tokens}")
-        st.sidebar.write(f"**Cost($):** {cost}")
-        # st.write(f"**Input Tokens:** {input_tokens} | **Output Tokens:** {output_tokens} | **Cost:** {cost}")
-
-
-    if "I don't know" in response or response == None:       
-        st.write('Info not in artefact...') 
-    print ("Checking...")
-    distinct_file_paths, meta_data_present = extract_distinct_file_paths(formatted_documents)
-
-    if meta_data_present:
+    if metadata_present:
         data = {
             "source": source,
-            "response": response,
-            "distinct_file_paths" : list (distinct_file_paths )       
+            "response": message_content,
+            "distinct_file_paths" : list (distinct_file_paths ) ,
+            "metadata_present" : True     
         }
     else:
         
         data = {
             "source": source,
-            "response": response
+            "response": message_content,
+            "metadata_present": False
                        
         }
     # Convert the dictionary to a JSON string
     json_data = json.dumps(data)
+    st.sidebar.write(f"**Usage Info:** ")
+    st.sidebar.write(f"**Model:** {model_name}")
+    st.sidebar.write(f"**Input Tokens:** {input_tokens}")
+    st.sidebar.write(f"**Output Tokens:** {output_tokens}")
+    st.sidebar.write(f"**Cost($):** {cost}")
+    st.session_state['current_user'] = user_name_logged
+    
 
     return json_data
 
@@ -392,8 +396,7 @@ def process_csv_file(file_path):
 
         # Create a pandas DataFrame from the CSV string
         data_frame = pd.read_csv(StringIO(csv_string))
-        print ("*********************")
-        print (len(data_frame))
+
         chunk_size = 50  # This can be made configurable.
         chunks = []
 
@@ -404,12 +407,9 @@ def process_csv_file(file_path):
             page_content = (
                 f"page_content='{chunk.to_string(index=False)}\n'"
             )
-            print (page_content)
+            
             chunks.append(page_content)
-            # chunks.append({"page_content": chunk.to_string()})
-            # print (chunks)
-            # chunks.append(chunk.to_string()) 
-            # print (data_frame)
+
         
         # return data_frame
     else:
@@ -465,7 +465,7 @@ def process_github(prompt, llm):
     )
 
     data = loader.load()
-    print (len(data))
+    
 
 def process_google_search(prompt,llm):
     print ('In process Google', prompt)
@@ -518,7 +518,7 @@ def process_google_search(prompt,llm):
     return json_data
 
 
-def process_YTLinks(youtube_video_url, user_input, promptId_random):
+def process_YTLinks(youtube_video_url, user_input):
     print ('In process_YTLinks New', user_input)   
     loader = YoutubeLoader.from_youtube_url(youtube_video_url, add_video_info=False)
     
@@ -557,7 +557,7 @@ def process_YTLinks(youtube_video_url, user_input, promptId_random):
             # embeddings = OpenAIEmbeddings()        
             # docsearch = Pinecone.from_texts([t.page_content for t in chunks], embeddings, index_name=index_name)
             persistence_choice = "Pinecone"
-            resp_YT = search_vector_store (persistence_choice, index_name, user_input, model, "YouTube", k_similarity, promptId_random, kr_repos_chosen)
+            resp_YT = search_vector_store (persistence_choice, index_name, user_input, model, "YouTube", k_similarity,  kr_repos_chosen)
        
             data_dict = json.loads(resp_YT)
             # Extracting the 'output_text' from the dictionary
@@ -581,57 +581,9 @@ class Document:
 def append_metadata(documents, file_path, repo_selected_for_upload):
     for doc in documents:
         doc.metadata["file_path"] = file_path
-        doc.metadata["access"] = "public"
+        doc.metadata["access"] = privacy_setting
         doc.metadata["repo"] = repo_selected_for_upload
-
-# def print_documents(documents):
-#     for doc in documents:
-#         print(f"Document(page_content='{doc.page_content}', metadata={doc.metadata}),")
         
-# def extract_distinct_file_paths2(docs):
-#     distinct_file_paths = set()
-#     meta_data_present = False
-
-#     for match in docs.get('matches', []):
-#         file_path = match.get('metadata', {}).get('file_path', '')
-#         if file_path:
-#             distinct_file_paths.add(file_path)
-#             meta_data_present = True
-
-#     return list(distinct_file_paths), meta_data_present
-        
-# def extract_distinct_file_paths(documents):
-#     file_paths = set()
-#     meta_data_present = False
-
-#     for doc in documents:
-#         if hasattr(doc, 'metadata') and isinstance(doc.metadata, dict) and "file_path" in doc.metadata:
-#             file_paths.add(doc.metadata["file_path"])
-#             meta_data_present = True
-
-#     return file_paths, meta_data_present
-
-# def format_file_paths(similarity_matches):
-#     unique_file_paths = set()
-#     formatted_paths = ""
-
-#     for match in similarity_matches.get('matches', []):
-#         meta = match.get('metadata')
-#         if meta and 'file_path' in meta:
-#             file_path = meta['file_path']
-#             if file_path not in unique_file_paths:
-#                 unique_file_paths.add(file_path)
-
-#     has_file_paths = bool(unique_file_paths)
-    
-#     formatted_paths += 'source: '
-#     if len(unique_file_paths) <= 3:
-#         formatted_paths += ', '.join(unique_file_paths)
-#     else:
-#         formatted_paths += ', '.join(list(unique_file_paths)[:3])
-#         formatted_paths += ', more...'
-
-#     return formatted_paths, has_file_paths
 
 def process_pdf_file(file_content, file_path, repo_selected_for_upload):
     print ('process_pdf_file')
@@ -640,7 +592,8 @@ def process_pdf_file(file_content, file_path, repo_selected_for_upload):
     text_content = [page.extract_text() for page in pdf_reader.pages]
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents(text_content)  
-    append_metadata(chunks, file_path)
+    print (repo_selected_for_upload)
+    append_metadata(chunks, file_path,repo_selected_for_upload)
    
     return chunks
     
@@ -667,29 +620,13 @@ def process_xlsx_file(s3,aws_bucket, file_path):
     # Read the Excel file into a pandas DataFrame
     df = pd.read_excel(excel_file)
 
-    # Now df contains your data as a pandas DataFrame
-    print(df)
     from pandasai import SmartDataframe
     from pandasai import SmartDatalake
     from pandasai.llm import OpenAI
     llm = OpenAI(api_token=OPENAI_API_KEY)
     dl = SmartDatalake([df], config={"llm": llm})
-    print ("**********************")
-    print (dl.chat("how many rows are there"))
-    print (dl.chat("what are the action items for 2021"))
-    print ("**********************")
-    
-    # document_instance = xlsx_content[0]
-    # page_content = document_instance.page_content
 
-    # print(page_content)
-
- 
-    # # text_content = file_content.decode('utf-8')   
-    # print (chunk_size) 
-    # print (chunk_overlap) 
-    # text_splitter = create_text_splitter(chunk_size, chunk_overlap)
-    # chunks = text_splitter.create_documents(page_content)        
+      
     return df
 
 def process_file(file_path, repo_selected_for_upload):
@@ -794,31 +731,21 @@ def extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload):
 
     return chunks
 
-def process_openai(prompt, model, Conversation):
-    print ("In process_openai")
-    st.session_state['messages'].append({"role": "user", "content": prompt})
-    print (prompt)
-    response = Conversation.run(input=prompt)
-    print (response)
-    st.session_state['messages'].append({"role": "assistant", "content": response})
- 
-    total_tokens = 0
-    prompt_tokens = 0
-    completion_tokens = 0
-    
-    response_openai = {
-        "source": "Open AI",
-        "response": response,
-        "total_tokens": total_tokens,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens
-    }
-    # Convert the dictionary to a JSON string
-    json_data = json.dumps(response_openai)
- 
-    return json_data
+def process_openai(prompt, model, Conversation, kr_repos_chosen, domain_choice):
+    print ("In process_openai ")
 
-def process_knowledge_base(prompt, model, Conversation, kr_repos_chosen, promptId_random):
+
+    # Initialize or retrieve session state for messages
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []
+        
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    json_data = get_gpt_response(client, model_name, st.session_state.messages, "Open AI", domain_choice)
+    return json_data
+    
+
+
+def process_knowledge_base(prompt, model, Conversation, kr_repos_chosen, domain_choice):
     print ('In process_knowledge_base ')    
     dotenv.load_dotenv(".env")
     env_vars = dotenv.dotenv_values()
@@ -842,7 +769,7 @@ def process_knowledge_base(prompt, model, Conversation, kr_repos_chosen, promptI
 
  
     # Rajesh change
-    resp = search_vector_store (persistence_choice, index_name, prompt, model, "KR", k_similarity, promptId_random, kr_repos_chosen)
+    resp = search_vector_store (persistence_choice, index_name, prompt, model, "KR", k_similarity, kr_repos_chosen, domain_choice)
 
     return resp
     
@@ -873,8 +800,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for
                 st.write(f'Processing file {index + 1}: {uploaded_file.name}')            
                 docs_chunks.extend(chunks) 
                 print (f'Total number of chunks : {len(docs_chunks)}')
-                  
-        embeddings = OpenAIEmbeddings()
+
 
         if repo_selected_for_upload in kr_repos_list:
             print(f'processing {repo_selected_for_upload} KR')
@@ -886,13 +812,15 @@ def process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for
                 os.environ[key] = env_vars[key]
                 
             OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-            if OPENAI_API_KEY:
-                openai.api_key = OPENAI_API_KEY
+            # if OPENAI_API_KEY:
+            #     openai.api_key = OPENAI_API_KEY
             pinecone.init (
                 api_key = os.getenv('PINECONE_API_KEY'),
                 environment = os.getenv('PINECONE_ENVIRONMENT')   
             )
             pinecone_index_name = os.getenv('PINECONE_INDEX_NAME')
+            client = OpenAI(organization = OPENAI_ORGANIZATION, api_key = OPENAI_API_KEY)
+            embeddings = OpenAIEmbeddings()
             try:
                 index_name = pinecone_index_name  # Specify the index name as a string
                 Pinecone.from_documents(
@@ -906,7 +834,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for
             print ("Vector Store Loaded!")
             return repo_selected_for_upload
 
-def selected_data_sources(selected_elements, prompt, model, llm, Conversation, kr_repos_chosen, kr_repos_list, promptId_random):
+def selected_data_sources(selected_elements, prompt, model, llm, Conversation, kr_repos_chosen, kr_repos_list, domain_choice):
     print ("In selected_data_sources")
     import json
 
@@ -926,26 +854,29 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, k
         if element in selected_elements_functions:
 
             if (element == 'Open AI'):
-                str_response = selected_elements_functions[element](prompt, model, Conversation)
+                str_response = selected_elements_functions[element](prompt, model, Conversation, domain_choice)
                 json_response = json.loads(str_response)
+                
+               
                 all_responses.append(json_response)
                 
             elif (element == 'KR'):
                 print ('Processing KR')
-                str_response = selected_elements_functions[element](prompt, model, Conversation, kr_repos_chosen, promptId_random)
+                str_response = selected_elements_functions[element](prompt, model, Conversation, kr_repos_chosen, domain_choice)
+                print (str_response)
                 json_response = json.loads(str_response)
                 print (json_response)
                 all_responses.append(json_response)
                 
             elif (element == 'Google'):
                 print ('Processing Google')
-                str_response = selected_elements_functions[element](prompt, llm, promptId_random)
+                str_response = selected_elements_functions[element](prompt, llm)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
                 
             elif (element == 'YouTube'):
                 print ('Processing YouTube')
-                str_response = selected_elements_functions[element](youtube_url , prompt, promptId_random)
+                str_response = selected_elements_functions[element](youtube_url , prompt)
                 json_response = json.loads(str_response)
                 all_responses.append(json_response)
                 
@@ -971,10 +902,11 @@ def selected_data_sources(selected_elements, prompt, model, llm, Conversation, k
     return accumulated_json_str
 
 def update_prompt(like_status, comments):
-    print ("In update_prompt")
+    print ("In update_prompt ", st.session_state['current_promptName'])
+
     data = {
         "userName": st.session_state['current_user'],
-        "promptName": st.session_state['curent_promptName'],
+        "promptName": st.session_state['current_promptName'],
         "feedback": like_status,
         "comments": comments
     }
@@ -990,22 +922,32 @@ def update_prompt(like_status, comments):
     if lambda_response['StatusCode'] != 200:
         raise Exception(f"AWS Lambda invocation failed with status code: {lambda_response['StatusCode']}")
 
-def get_response(user_input, kr_repos_chosen, promptId_random):
+    # Function to format date
+def format_date(date_str):
+    from datetime import datetime
+    date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+    if date_obj.date() == datetime.today().date():
+        return 'Today'
+    elif date_obj.date() == (datetime.today() - pd.Timedelta(days=1)).date():
+        return 'Yesterday'
+    else:
+        return date_obj.strftime('%d%b%y')
+
+
+def get_response(user_input, kr_repos_chosen):
     import json
     print ('In get_response...', kr_repos_chosen)
     
     if 'text2Image' in selected_sources_image and user_input and goButton:
         with st.spinner("Generating image..."):
             with response_container:
-                 process_text2image(user_input, promptId_random)
+                 process_text2image(user_input)
     else:  
 
         if  user_input and len(selected_sources) > 0 and goButton:
-          print ("Number of Sources" , len(selected_sources))
-          print (selected_sources)
 
           with st.spinner("Searching requested sources..."):        
-            str_resp = selected_data_sources(selected_sources, user_input, model_name, llm, Conversation, kr_repos_chosen, kr_repos_list, promptId_random)               
+            str_resp = selected_data_sources(selected_sources, user_input, model_name, llm, Conversation, kr_repos_chosen, kr_repos_list, domain_choice)               
             data = json.loads(str_resp)['all_responses']
 
             response_dict = {
@@ -1016,14 +958,19 @@ def get_response(user_input, kr_repos_chosen, promptId_random):
                 'youtube_response':None,
                 'kr_response':None
             }
-            for response in data:
-                source = response['source']
-                if source in selected_sources:
-                    
-                    if source == "KR":
-                        response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']['output_text'] + "\n\n" + "Doc Sources: " + ", ".join(response['distinct_file_paths'])
-                    else:                        
-                        response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']
+
+            if not trigger_inference:
+                for response in data:
+                    source = response['source']
+                    if source in selected_sources:
+                        
+                        if source == "KR":
+                            if (response['metadata_present']):
+                                response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response'] + "\n\n" + "Doc Sources: " + ", ".join(response['distinct_file_paths'])
+                            else:
+                                response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response'] + "\n\n" + "Doc Sources: "  + "NA"   
+                        else:                        
+                            response_dict[f"{source.lower().replace(' ', '_')}_response"] = response['response']
            
             st.session_state["user_prompts"].append(user_input)        
             st.session_state['sel_source'].append(selected_sources)
@@ -1061,6 +1008,7 @@ def get_response(user_input, kr_repos_chosen, promptId_random):
                 print ('kr_response')            
                 st.session_state['generated_KR'].append(kr_response)
                 choice_str = ', '.join(kr_repos_chosen) if kr_repos_chosen else "None selected"
+                # all_response_str = all_response_str + "<h4>From KR: " + choice_str + "</h4>" + "<hr>" + "<p>" + kr_response + "</p>"
                 all_response_str = all_response_str + "From KR: " + choice_str +  "\n" + "----------------------" + "\n\n" + kr_response + "\n\n"
                 
             if huggingface_response:
@@ -1069,6 +1017,8 @@ def get_response(user_input, kr_repos_chosen, promptId_random):
               
             else:
                 print("Uploads data is not available.")
+                
+
 
            
             st.session_state["all_response_dict"].append (all_response_str)
@@ -1111,7 +1061,7 @@ with container:
             uploaded_kr = process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for_upload)
             st.write ("Done!")
              
-    if (task =='Query'):
+    if (task =='Query'):        
         
         if 'text2Image' in selected_sources_image:
             selected_sources_text = 'text2Image'
@@ -1119,6 +1069,7 @@ with container:
             placeholder_default = None
             ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
             user_input = st.text_area(ask_text, height=150, key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
+            
         else:
             if macro_view:
                 try:
@@ -1139,101 +1090,157 @@ with container:
                   
                 except pinecone.exceptions.PineconeException as e:
                     print(f"An error occurred: {str(e)}")
-                    # Rajesh to come
+            trigger_inference_image_uploaded = False
                 
-            selected_sources_text = ", ".join(selected_sources)
-            default_text_value = ''
-            placeholder_default = "Ask something..."
-            ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
-            if show_text_area:
-        # Text area for longer prompts
-                user_input = st.text_area(ask_text, placeholder=placeholder_default, height=300)
-            else:
-                user_input = st.text_input(ask_text,  key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
-        
-        col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+            if trigger_inference:  
+                print ("In trigger_inference")  
+                selected_sources_text = "Image Inference"
+                uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])  
+                if uploaded_file is not None:
+                    st.write("")
+                    st.write("")
+                    print ("Uploaded File not none ", uploaded_file.name)
+                    trigger_inference_image_uploaded = True
+                    st.image(uploaded_file, caption='Uploaded Image: ' + uploaded_file.name, use_column_width=True)
+                    placeholder_default = "Ask something about the image..."
+                    if show_text_area:
+                        user_input = st.text_area("Ask:", placeholder=placeholder_default, height=300)
+                    else:
+                        user_input = st.text_input("Ask:",  key='input', placeholder=placeholder_default, label_visibility="visible") 
 
-        with col1:
-            goButton = st.button("Go")
+                    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+                    with col1:
+                        goButton = st.button("Go")     
+                    with col2:
+                        add_to_library = st.button("Add to 📚", help = "add this prompt to your prompt library")               
+                    with col3:
+                        show_library = st.button("Your 📚", help = "click to see your prompt library") 
+                    with col4:
+                        improve_button = st.button("Improve", type="primary", help = "report this prompt to for investigation")    
+                    if user_input:                      
 
-        with col3:
-            add_to_library = st.button("Add to Library")       
+                        if goButton:
+                            s3_path = upload_to_s3_refactor("bucket-company-static-assets", uploaded_file)
+                            image_url = generate_presigned_url("bucket-company-static-assets", s3_path)
+                            response = get_inference(user_input, image_url)
+                            st.write(response)
+                else:
+                    trigger_inference_image_uploaded = False
+            else:  
+                selected_sources_text = ", ".join(selected_sources)                
+                default_text_value = ''
+                placeholder_default = "Ask ..."
+                ask_text = "**Selected Sources:** " + "**:green[" + selected_sources_text + "]**" 
+                if show_text_area:
+                    # Text area for longer prompts
+                    user_input = st.text_area(ask_text, placeholder=placeholder_default, height=300)
+                else:
+                    user_input = st.text_input(ask_text,  key='input', value = default_text_value, placeholder=placeholder_default, label_visibility="visible") 
+                col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
+                with col1:
+                    goButton = st.button("Go")   
+                                    
+                with col3:
+                    show_library = st.button("Your 📚", help = "click to see your prompt library")
+                with col2:
+                    add_to_library = st.button("Add to 📚", help = "add this prompt to your prompt library") 
+                with col4:
+                    improve_button = st.button("Improve", type="primary", help = "report this prompt to for investigation")         
+                
+                if goButton:         
+                    get_response (user_input, kr_repos_chosen)
+                    
+                # Display the conversation history using an expander, and allow the user to download it.
+        words_in_input_text = False
+        if ((trigger_inference_image_uploaded and trigger_inference) or (not trigger_inference)):
+           
+            if user_input.strip():  # This ensures that empty spaces are not counted
+                words = user_input.split()
+                if len(words) >= 1:
+                    words_in_input_text = True
 
-        with col4:
-            improve_button = st.button("Improve", type="primary")         
-             
-        if add_to_library:
-            st.session_state.button_pressed = "Add to Library"
-            st.session_state.feedback_given = False 
-        if improve_button:
-            st.session_state.button_pressed = "Improve"
-            st.session_state.feedback_given = False 
+            if words_in_input_text:
+                if add_to_library:
+                    st.session_state.button_pressed = "Add to Library"
+                    st.session_state.feedback_given = False 
+                if improve_button:
+                    st.session_state.button_pressed = "Improve"
+                    st.session_state.feedback_given = False 
 
-        if st.session_state.button_pressed and not st.session_state.feedback_given:
-
-            placeholder = st.empty()
-
-            with placeholder.form(key='comment_form'):
-                comments = st.text_input("Enter comments:")
-                submit_button = st.form_submit_button("Submit")
+            if st.session_state.button_pressed and not st.session_state.feedback_given:
+                placeholder = st.empty()
+                with placeholder.form(key='comment_form'):
+                    comments = st.text_input("Enter comments:")
+                    submit_button = st.form_submit_button("Submit")
 
             # If the submit button is pressed, handle the submission and clear the placeholder
-            if submit_button:
-                update_prompt(st.session_state.button_pressed, comments)
-                st.info("Noted")
-                st.session_state.feedback_given = True
-                st.session_state.button_pressed= False
-                placeholder.empty()  # This clears the form
-
-    
-        if goButton:
-            random_string = str(uuid.uuid4())
-            promptId_random = "prompt-" + random_string
-            print ("kr_repos_list")
-            print (kr_repos_list)
-            print ("kr_repos_chosen")
-            print (kr_repos_chosen)
-            
-            
-            get_response (user_input, kr_repos_chosen, promptId_random)
-            download_str = []
-        # Display the conversation history using an expander, and allow the user to download it.
-            with st.expander("Download Conversation", expanded=False):
-                for i in range(len(st.session_state['generated_response'])-1, -1, -1):
-                    st.info(st.session_state["user_prompts"][i],icon="✅")
-                    st.success(st.session_state["generated_response"][i], icon="✅")
-                    download_str.append(st.session_state["user_prompts"][i])
-                    download_str.append(st.session_state["generated_response"][i])
- 
-                download_str = '\n'.join(download_str)
-                if download_str:
-                    st.download_button('Download',download_str)
-        if st.button("Your Prompt Library"):
-            add_to_library_str = "Add to Library"              
-            data = {
-                "userName": st.session_state['current_user']
-            }
-            lambda_function_name = PROMPT_QUERY_LAMBDA
-            lambda_response = lambda_client.invoke(
-                FunctionName=lambda_function_name,
-                InvocationType='RequestResponse',
-                Payload=json.dumps(data)
-            )
-            response_payload = json.loads(lambda_response['Payload'].read().decode('utf-8'))
-            items = response_payload.get("Items", [])
-            
-            if items:
-                st.markdown("Curated prompts saved by <b>{}</b>".format(st.session_state['current_user']), unsafe_allow_html=True)
-                    # Create a Pandas DataFrame
-                df = pd.DataFrame([
-                    {"Prompt": item["prompt"]["S"], "Comments": item["comments"]["S"], "PromptName": item["promptName"]["S"]}
-                    for item in items
-                ])
+                if submit_button:
+                    update_prompt(st.session_state.button_pressed, comments)
+                    st.info("Noted")
+                    st.session_state.feedback_given = True
+                    st.session_state.button_pressed= False
+                    placeholder.empty()  # This clears the form
 
 
-                # Display the DataFrame with Streamlit, setting the counter to start from 1
-                st.table(df.assign(Counter=range(1, len(df) + 1)).set_index('Counter'))
-            else:
+        if not trigger_inference_image_uploaded and  trigger_inference:
+            show_library = st.button("Your 📚", help = "click to see your prompt library")
+
+        if show_library:
+                add_to_library_str = "Add to Library"              
+                data = {
+                    "userName": st.session_state['current_user']
+                }
+                lambda_function_name = PROMPT_QUERY_LAMBDA
+                lambda_response = lambda_client.invoke(
+                    FunctionName=lambda_function_name,
+                    InvocationType='RequestResponse',
+                    Payload=json.dumps(data)
+                )
+                response_payload = json.loads(lambda_response['Payload'].read().decode('utf-8'))
+                items = response_payload.get("Items", [])
+
+                if items:
+                    st.markdown("Curated prompts saved by <b>{}</b>".format(st.session_state['current_user']), unsafe_allow_html=True)
+
+                    # Create a Pandas DataFrame with necessary fields including 'datetimestamp' and 'domain'
+                    df = pd.DataFrame([
+                        {"Prompt": item["prompt"]["S"], "Comments": item["comments"]["S"],
+                        "Date": item["date"]["S"], "Time": item["time"]["S"], "DateTimestamp": item["datetimestamp"]["S"], 
+                        "domain": item.get("domain", {}).get("S", "Not Specified")}  # Provide a default value if 'domain' is not present
+                        for item in items
+                    ])  
+
+                    # Convert 'DateTimestamp' to datetime and sort in descending order
+                    df['DateTimestamp'] = pd.to_datetime(df['DateTimestamp'])
+                    df.sort_values(by='DateTimestamp', ascending=False, inplace=True)
+
+                    # Apply formatting to the 'Date' and 'Time' columns
+                    df['Date'] = df['Date'].apply(format_date)
+                    df['Time'] = pd.to_datetime(df['Time'], format='%H:%M:%S').dt.strftime('%I:%M %p').str.lower()
+
+                    # Filter the DataFrame based on the domain choice
+                    filtered_df = df[df['domain'].astype(str) == domain_choice]
+
+                    # Define columns to display: 'Prompt', 'Comments', 'Date', 'Time', and possibly 'domain'
+                    df_display = filtered_df[['Prompt', 'Comments', 'Date', 'Time']]                    
+
+                    # Display the filtered DataFrame with Streamlit, setting the counter to start from 1
+                    st.table(df_display.assign(Counter=range(1, len(df_display) + 1)).set_index('Counter'))
+                else:
                     st.write("No items found with 'Add to Library' feedback.")
-         
+
+                    
+        with st.expander("Download Conversation", expanded=False):
+            download_str = []
            
+            for i in range(len(st.session_state['generated_response'])-1, -1, -1):
+                st.info(st.session_state["user_prompts"][i],icon="✅")
+                st.success(st.session_state["generated_response"][i], icon="✅")
+                download_str.append(st.session_state["user_prompts"][i])
+                download_str.append(st.session_state["generated_response"][i])
+
+            download_str = '\n'.join(download_str)
+            if download_str:
+                st.download_button('Download',download_str)
+                    
+                    

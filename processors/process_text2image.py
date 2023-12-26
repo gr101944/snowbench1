@@ -3,7 +3,7 @@ import os
 import openai
 import streamlit as st
 import dotenv
-def process_text2image (prompt, promptId_random):
+def process_text2image (prompt):
     import requests
     from datetime import datetime
     text2image_model_name = "dall-e-3"
