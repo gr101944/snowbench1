@@ -585,8 +585,8 @@ def append_metadata(documents, file_path, repo_selected_for_upload, privacy_sett
         doc.metadata["repo"] = repo_selected_for_upload
         
 
-def process_pdf_file(file_content, file_path, repo_selected_for_upload):
-    print ('process_pdf_file')
+def process_pdf_file(file_content, file_path, repo_selected_for_upload, privacy_setting):
+    print ('process_pdf_file privacy_setting: ', privacy_setting)
     pdf_stream = io.BytesIO(file_content)
     pdf_reader = PyPDF2.PdfReader(pdf_stream)
     text_content = [page.extract_text() for page in pdf_reader.pages]
@@ -597,8 +597,8 @@ def process_pdf_file(file_content, file_path, repo_selected_for_upload):
    
     return chunks
     
-def process_text_file_new(file_content, file_path, repo_selected_for_upload):
-    print("In process_file_new")
+def process_text_file_new(file_content, file_path, repo_selected_for_upload, privacy_setting):
+    print("In process_file_new privacy_setting ", privacy_setting)
     # print (file_content)
     text_content = file_content.decode('utf-8')     
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
@@ -629,7 +629,7 @@ def process_xlsx_file(s3,aws_bucket, file_path):
       
     return df
 
-def process_file(file_path, repo_selected_for_upload):
+def process_file(file_path, repo_selected_for_upload, privacy_setting):
     print(f'Processing file: {file_path}')
     aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
     aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
@@ -649,10 +649,10 @@ def process_file(file_path, repo_selected_for_upload):
     file_extension = os.path.splitext(file_path)[1][1:].lower()  # Get file extension without the dot
 
     if file_extension == 'pdf':
-        chunks = process_pdf_file(file_content, file_path, repo_selected_for_upload)
+        chunks = process_pdf_file(file_content, file_path, repo_selected_for_upload, privacy_setting)
 
     elif file_extension == 'txt':
-        chunks = process_text_file_new(file_content, file_path, repo_selected_for_upload)
+        chunks = process_text_file_new(file_content, file_path, repo_selected_for_upload, privacy_setting)
         
     elif file_extension == 'csv':
         chunks = process_csv_file(s3,aws_bucket, file_path)
@@ -704,7 +704,7 @@ def get_from_s3(bucket_name, path_name):
     response = s3.get_object(Bucket=bucket_name, Key=path_name)
     return response
     
-def extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload):
+def extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload, privacy_setting):
     print('In extract_chunks_from_uploaded_file')
     bucket_name = os.getenv('S3_BUCKET_NAME')
     s3_target_path = upload_to_s3(bucket_name,uploaded_file)
@@ -713,11 +713,11 @@ def extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload):
         
 
     if file_extension.lower() == '.pdf': 
-        chunks = process_file(s3_target_path, repo_selected_for_upload)
+        chunks = process_file(s3_target_path, repo_selected_for_upload, privacy_setting)
         print ("pdf_chunks: ", len(chunks))
     elif file_extension.lower() == '.txt':
         print ("Processing .txt ")        
-        chunks = process_file(s3_target_path, repo_selected_for_upload)
+        chunks = process_file(s3_target_path, repo_selected_for_upload, privacy_setting)
     elif file_extension.lower() == '.csv':
         chunks = process_csv_file(s3_target_path)
     elif file_extension.lower() == '.docx':
@@ -791,7 +791,7 @@ def process_uploaded_file(uploaded_files,  persistence_choice, repo_selected_for
                 print ('Check input file extension')
                 return
             print ('Creating chunks...')
-            chunks = extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload)
+            chunks = extract_chunks_from_uploaded_file(uploaded_file, repo_selected_for_upload, privacy_setting)
 
             if chunks == 0:
                 print("No chunks extracted from: ", uploaded_file)                    
