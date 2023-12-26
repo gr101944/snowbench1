@@ -625,7 +625,6 @@ def process_xlsx_file(s3,aws_bucket, file_path):
     from pandasai.llm import OpenAI
     llm = OpenAI(api_token=OPENAI_API_KEY)
     dl = SmartDatalake([df], config={"llm": llm})
-
       
     return df
 
