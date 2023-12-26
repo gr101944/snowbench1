@@ -578,7 +578,7 @@ class Document:
         self.page_content = page_content
         self.metadata = metadata if metadata is not None else {}
 
-def append_metadata(documents, file_path, repo_selected_for_upload):
+def append_metadata(documents, file_path, repo_selected_for_upload, privacy_setting):
     for doc in documents:
         doc.metadata["file_path"] = file_path
         doc.metadata["access"] = privacy_setting
@@ -593,7 +593,7 @@ def process_pdf_file(file_content, file_path, repo_selected_for_upload):
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents(text_content)  
     print (repo_selected_for_upload)
-    append_metadata(chunks, file_path,repo_selected_for_upload)
+    append_metadata(chunks, file_path,repo_selected_for_upload, privacy_setting)
    
     return chunks
     
@@ -603,7 +603,7 @@ def process_text_file_new(file_content, file_path, repo_selected_for_upload):
     text_content = file_content.decode('utf-8')     
     text_splitter = create_text_splitter(chunk_size, chunk_overlap)
     chunks = text_splitter.create_documents([text_content]) 
-    append_metadata(chunks, file_path, repo_selected_for_upload)  
+    append_metadata(chunks, file_path, repo_selected_for_upload, privacy_setting)  
 
     return chunks
     
