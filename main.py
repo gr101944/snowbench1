@@ -10,6 +10,13 @@ env_vars = dotenv.dotenv_values()
 for key in env_vars:
     os.environ[key] = env_vars[key]
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+user = os.environ.get("SNOWFLAKE_USER")
+
+password = os.environ.get("SNOWFLAKE_PASSWORD")
+account = os.environ.get("SNOWFLAKE_ACCOUNT")
+warehouse = os.environ.get("SNOWFLAKE_WAREHOUSE")
+role = os.environ.get("SNOWFLAKE_ROLE")
+
 
 st.title("❄️ + 🛠️ SnowBench")
 

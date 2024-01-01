@@ -9,3 +9,4 @@
 *.doc
 __pycache__/
 *.py[cod]
+*.toml
