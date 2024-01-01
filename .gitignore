@@ -7,3 +7,5 @@
 *.xlsx
 # Ignore .pdf files
 *.doc
+__pycache__/
+*.py[cod]
