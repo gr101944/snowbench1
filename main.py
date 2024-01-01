@@ -30,7 +30,7 @@ def create_snowflake_connection():
 st.title("❄️ + 🛠️ SnowBench")
 
 # Initialize the chat messages history
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key = OPENAI_API_KEY)
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "system", "content": get_system_prompt()}]
 
